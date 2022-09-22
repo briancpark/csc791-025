@@ -18,8 +18,8 @@ jobs:
         DISCORD_AVATAR: https://melmagazine.com/wp-content/uploads/2021/01/66f-1.jpg
       uses: Ilshidur/action-discord@0.3.2
       with:
-        args: 'A new commit has been pushed to ${{ github.head_ref }}! Giga Chad Approved!'
+        args: 'A new commit has been pushed! Giga Chad Approved!'
     - name: Discord notification
       env:
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-      uses: Ilshidur/action-discord@master
+      uses: Ilshidur/action-discord@0.3.2
