@@ -28,3 +28,11 @@ device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if 
 cd examples/mnist
 pip3 install -r requirements.txt
 ```
+
+
+To run jupyter notebook on ARC cluster with VSCode extension make sure to run these commands:
+```sh
+jupyter-notebook --ip=cXX *.ipynb
+module load cuda
+```
+
