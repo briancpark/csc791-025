@@ -1,4 +1,0 @@
-nni>=2.9
-jupyter
-jupyterlab
-tensorboard

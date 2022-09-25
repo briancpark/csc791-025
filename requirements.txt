@@ -1,1 +1,6 @@
 nni>=2.9
+torch>=1.12.0
+torchaudio>=0.12.0
+torchvision>=0.13.0
+tensorboard<=2.80
+torchviz>=0.0.2
