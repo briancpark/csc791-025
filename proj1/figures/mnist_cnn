@@ -1,74 +1,74 @@
 digraph {
 	graph [size="12,12"]
 	node [align=left fontname=monospace fontsize=10 height=0.2 ranksep=0.1 shape=box style=filled]
-	4838295968 [label="
+	4896145952 [label="
  (1, 10)" fillcolor=darkolivegreen1]
-	4838093728 [label=LogSoftmaxBackward0]
-	4838093440 -> 4838093728
-	4838093440 [label=AddmmBackward0]
-	4838093584 -> 4838093440
-	4838295408 [label="fc2.bias
+	4851530336 [label=LogSoftmaxBackward0]
+	4851530624 -> 4851530336
+	4851530624 [label=AddmmBackward0]
+	4851530480 -> 4851530624
+	4851667312 [label="fc2.bias
  (10)" fillcolor=lightblue]
-	4838295408 -> 4838093584
-	4838093584 [label=AccumulateGrad]
-	4838093392 -> 4838093440
-	4838093392 [label=MulBackward0]
-	4838093632 -> 4838093392
-	4838093632 [label=ReluBackward0]
-	4838093056 -> 4838093632
-	4838093056 [label=AddmmBackward0]
-	4838092960 -> 4838093056
-	4838295248 [label="fc1.bias
+	4851667312 -> 4851530480
+	4851530480 [label=AccumulateGrad]
+	4851530672 -> 4851530624
+	4851530672 [label=MulBackward0]
+	4851530432 -> 4851530672
+	4851530432 [label=ReluBackward0]
+	4851530864 -> 4851530432
+	4851530864 [label=AddmmBackward0]
+	4851530960 -> 4851530864
+	4851667232 [label="fc1.bias
  (128)" fillcolor=lightblue]
-	4838295248 -> 4838092960
-	4838092960 [label=AccumulateGrad]
-	4838093008 -> 4838093056
-	4838093008 [label=ReshapeAliasBackward0]
-	4838092864 -> 4838093008
-	4838092864 [label=MulBackward0]
-	4838092576 -> 4838092864
-	4838092576 [label=MaxPool2DWithIndicesBackward0]
-	4838092432 -> 4838092576
-	4838092432 [label=ReluBackward0]
-	4838092288 -> 4838092432
-	4838092288 [label=ConvolutionBackward0]
-	4838094304 -> 4838092288
-	4838094304 [label=ReluBackward0]
-	4838094496 -> 4838094304
-	4838094496 [label=ConvolutionBackward0]
-	4838094592 -> 4838094496
-	4838294848 [label="conv1.weight
+	4851667232 -> 4851530960
+	4851530960 [label=AccumulateGrad]
+	4851530912 -> 4851530864
+	4851530912 [label=ReshapeAliasBackward0]
+	4851531056 -> 4851530912
+	4851531056 [label=MulBackward0]
+	4851531248 -> 4851531056
+	4851531248 [label=MaxPool2DWithIndicesBackward0]
+	4851531344 -> 4851531248
+	4851531344 [label=ReluBackward0]
+	4851531440 -> 4851531344
+	4851531440 [label=ConvolutionBackward0]
+	4851531536 -> 4851531440
+	4851531536 [label=ReluBackward0]
+	4851531728 -> 4851531536
+	4851531728 [label=ConvolutionBackward0]
+	4851531632 -> 4851531728
+	4851666752 [label="conv1.weight
  (32, 1, 3, 3)" fillcolor=lightblue]
-	4838294848 -> 4838094592
-	4838094592 [label=AccumulateGrad]
-	4838094544 -> 4838094496
-	4838294928 [label="conv1.bias
+	4851666752 -> 4851531632
+	4851531632 [label=AccumulateGrad]
+	4896194672 -> 4851531728
+	4851666832 [label="conv1.bias
  (32)" fillcolor=lightblue]
-	4838294928 -> 4838094544
-	4838094544 [label=AccumulateGrad]
-	4838092240 -> 4838092288
-	4838295088 [label="conv2.weight
+	4851666832 -> 4896194672
+	4896194672 [label=AccumulateGrad]
+	4851531488 -> 4851531440
+	4851666992 [label="conv2.weight
  (64, 32, 3, 3)" fillcolor=lightblue]
-	4838295088 -> 4838092240
-	4838092240 [label=AccumulateGrad]
-	4838092672 -> 4838092288
-	4838295168 [label="conv2.bias
+	4851666992 -> 4851531488
+	4851531488 [label=AccumulateGrad]
+	4851531152 -> 4851531440
+	4851667072 [label="conv2.bias
  (64)" fillcolor=lightblue]
-	4838295168 -> 4838092672
-	4838092672 [label=AccumulateGrad]
-	4838093152 -> 4838093056
-	4838093152 [label=TBackward0]
-	4838092528 -> 4838093152
-	4838295008 [label="fc1.weight
+	4851667072 -> 4851531152
+	4851531152 [label=AccumulateGrad]
+	4851530768 -> 4851530864
+	4851530768 [label=TBackward0]
+	4851531296 -> 4851530768
+	4851667152 [label="fc1.weight
  (128, 9216)" fillcolor=lightblue]
-	4838295008 -> 4838092528
-	4838092528 [label=AccumulateGrad]
-	4838093488 -> 4838093440
-	4838093488 [label=TBackward0]
-	4838092912 -> 4838093488
-	4838295328 [label="fc2.weight
+	4851667152 -> 4851531296
+	4851531296 [label=AccumulateGrad]
+	4851530576 -> 4851530624
+	4851530576 [label=TBackward0]
+	4851531008 -> 4851530576
+	4851666912 [label="fc2.weight
  (10, 128)" fillcolor=lightblue]
-	4838295328 -> 4838092912
-	4838092912 [label=AccumulateGrad]
-	4838093728 -> 4838295968
+	4851666912 -> 4851531008
+	4851531008 [label=AccumulateGrad]
+	4851530336 -> 4896145952
 }

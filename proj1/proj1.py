@@ -15,6 +15,7 @@ import glob
 import time
 import numpy as np
 import matplotlib.pyplot as plt
+import torchvision.models as models
 
 device = torch.device(
     "mps"
@@ -28,13 +29,13 @@ print("Using device:", device.type.upper())
 
 batch_size = 64
 test_batch_size = 1000
-epochs = 14
+epochs = 100
 lr = 1.0
 gamma = 0.7
 seed = 1
 save_model = False
-criterion = F.nll_loss
-TRIALS = 10
+criterion = nn.CrossEntropyLoss()
+TRIALS = 5
 
 arc_env = os.path.exists("/mnt/beegfs/$USER")
 os.system("mkdir -p figures")
@@ -91,7 +92,7 @@ def train(model, device, train_loader, optimizer, criterion, epoch):
         t_iter.set_description("Loss: %.4f" % loss.item(), refresh=False)
 
 
-def test(model, device, test_loader):
+def test(model, device, test_loader, criterion):
     touch()
 
     model.eval()
@@ -101,8 +102,10 @@ def test(model, device, test_loader):
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
-            test_loss += F.nll_loss(
-                output, target, reduction="sum"
+            test_loss += criterion(
+                output,
+                target  # , reduction="sum"
+                # TODO: Figure out the significance of reduction argument.
             ).item()  # sum up batch loss
             pred = output.argmax(
                 dim=1, keepdim=True
@@ -117,18 +120,36 @@ def test(model, device, test_loader):
     return test_loss, correct, test_dataset_length, accuracy
 
 
-def load_data(train_kwargs, test_kwargs):
+def load_data(train_kwargs, test_kwargs, mnist=True):
     if arc_env:
         dir = "/mnt/beegfs/$USER/data/"
     else:
         dir = "data"
 
-    transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-    )
+    if mnist:
+        # The transformations were copied from the PyTorch MNIST example
+        transform = transforms.Compose(
+            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+        )
 
-    dataset1 = datasets.MNIST(dir, train=True, download=True, transform=transform)
-    dataset2 = datasets.MNIST(dir, train=False, transform=transform)
+        dataset1 = datasets.MNIST(dir, train=True, download=True, transform=transform)
+        dataset2 = datasets.MNIST(dir, train=False, transform=transform)
+    else:
+        # The transformations were copied from https://www.programcreek.com/python/example/105099/torchvision.datasets.CIFAR100
+        transform = transforms.Compose(
+            [
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomCrop(32, padding=4),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[n / 255.0 for n in [129.3, 124.1, 112.4]],
+                    std=[n / 255.0 for n in [68.2, 65.4, 70.4]],
+                ),
+            ]
+        )
+
+        dataset1 = datasets.CIFAR10(dir, train=True, download=True, transform=transform)
+        dataset2 = datasets.CIFAR10(dir, train=False, transform=transform)
 
     train_loader = torch.utils.data.DataLoader(dataset1, **train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
@@ -136,24 +157,36 @@ def load_data(train_kwargs, test_kwargs):
     return train_loader, test_loader
 
 
-def train_models():
+def train_models(resnet=False, retrain=False):
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
-    train_loader, test_loader = load_data(train_kwargs, test_kwargs)
+    train_loader, test_loader = load_data(train_kwargs, test_kwargs, mnist=not resnet)
 
-    model = Net().to(device)
+    if resnet:
+        model_save_path = "models/cifar10_resnet18.pt"
+        model = models.resnet101().to(device)
+    else:
+        model_save_path = "models/mnist_cnn.pt"
+        model = Net().to(device)
+
+    # If we were in the middle of training, reload the model.
+    if os.path.exists(model_save_path) or retrain:
+        model = torch.load(model_save_path)
 
     optimizer = optim.Adadelta(model.parameters(), lr=lr)
     scheduler = StepLR(optimizer, step_size=1, gamma=gamma)
     criterion = F.nll_loss
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = SGD(model.parameters(), lr=0.001, momentum=0.9)
 
     # If we're using NVIDIA, we can apply some more software/hardware optimizations if available
     if device.type == "cuda":
         cuda_kwargs = {"num_workers": 1, "pin_memory": True, "shuffle": True}
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
-        torch.backends.cudnn.benchmark = True
+        # torch.backends.cudnn.benchmark = True
 
     for epoch in tqdm(
         range(1, epochs + 1),
@@ -163,11 +196,16 @@ def train_models():
         colour="green",
     ):
         train(model, device, train_loader, optimizer, criterion, epoch)
+        _, _, _, accuracy = test(model, device, test_loader, criterion)
+        tqdm.write("Accuracy: %.4f" % accuracy)
         scheduler.step()
 
-    torch.save(model, "models/mnist_cnn.pt")
+        ### Update the weights and save the model
+        torch.save(model, model_save_path)
 
-    test_loss, correct, test_dataset_length, accuracy = test(model, device, test_loader)
+    test_loss, correct, test_dataset_length, accuracy = test(
+        model, device, test_loader, criterion
+    )
     print(
         "Average test loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)".format(
             test_loss, correct, test_dataset_length, accuracy
@@ -175,10 +213,12 @@ def train_models():
     )
 
 
-def pruner(model, train_loader, test_loader, sparsity):
+def prune_helper(model, train_loader, test_loader, sparsity, resnet):
     config_list = [
-        {"sparsity_per_layer": sparsity, "op_types": ["Conv2d", "Linear"]},
-        {"exclude": True, "op_names": ["fc2"]},
+        # {"sparsity_per_layer": sparsity, "op_types": ["Conv2d", "Linear"]},
+        # {"exclude": True, "op_names": ["fc2"]},
+        {"sparsity_per_layer": sparsity, "op_types": ["Conv2d",]},
+        {"exclude": True, "op_names": ["fc"]},
     ]
     print(model)
     pruner = L1NormPruner(model, config_list)
@@ -196,7 +236,8 @@ def pruner(model, train_loader, test_loader, sparsity):
 
     # need to unwrap the model, if the model is wrapped before speedup
     pruner._unwrap_model()
-    ModelSpeedup(model, torch.rand(64, 1, 28, 28).to(device), masks).speedup_model()
+    ModelSpeedup(model, torch.rand(64, 3, 28, 28).to(device), masks).speedup_model()
+    # ModelSpeedup(model, torch.rand(64, 1, 28, 28).to(device), masks).speedup_model()
 
     optimizer = SGD(model.parameters(), 1e-2)
     for epoch in tqdm(
@@ -208,77 +249,107 @@ def pruner(model, train_loader, test_loader, sparsity):
     ):
         train(model, device, train_loader, optimizer, criterion, epoch)
 
-    test_loss, correct, test_dataset_length, accuracy = test(model, device, test_loader)
+    test_loss, correct, test_dataset_length, accuracy = test(
+        model, device, test_loader, criterion
+    )
     tqdm.write(
         "Average test loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)".format(
             test_loss, correct, test_dataset_length, accuracy
         )
     )
 
-    torch.save(
-        model, "models/mnist_cnn_pruned_sparsity_{0}.pt".format(int(sparsity * 100))
-    )
+    if resnet:
+        torch.save(
+            model, "models/cifar10_resnet18_pruned_sparsity_{0}.pt".format(int(sparsity * 100))
+        )
+    else:
+        torch.save(
+            model, "models/mnist_cnn_pruned_sparsity_{0}.pt".format(int(sparsity * 100))
+        )
 
 
-def prune(device):
+def prune(device, resnet=False):
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
-    train_loader, test_loader = load_data(train_kwargs, test_kwargs)
+    train_loader, test_loader = load_data(train_kwargs, test_kwargs, mnist=not resnet)
 
-    model = torch.load("models/mnist_cnn.pt")
+    if resnet:
+        model_save_path = "models/cifar10_resnet18.pt"
+    else:
+        model_save_path = "models/mnist_cnn.pt"
+
+    model = torch.load(model_save_path)
 
     if device.type == "cuda":
         cuda_kwargs = {"num_workers": 1, "pin_memory": True, "shuffle": True}
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
         # torch.backends.cudnn.benchmark = True
+        # TODO: this is causing weird issues during the pruning phase
 
     model = model.to(device)
 
     oids = []
     sparsities = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+
+    # if device.type == "cuda":
+    #     import ray
+
+    #     ray.init(num_gpus=1)
+    #     r = ray.remote(num_gpus)
+    #     prune_helper = r(prune_helper).remote
+
     for sparsity in sparsities:
-        oid = pruner(model, train_loader, test_loader, sparsity)
+        oid = prune_helper(model, train_loader, test_loader, sparsity, resnet)
         oids.append(oid)
 
-        # import ray
-
-
-# ray.init(num_gpus=1)
-
-# ray.wait(oids)
+    # if device.type == "cuda":
+    #     ray.wait(oids)
 
 
 def figures(device):
     if device.type == "mps":
         UserWarning("Cannot generate graphs on MPS mode, fallback to CPU")
         device = torch.device("cpu")
-    model = Net().to(device)
-    yhat = model(torch.rand(1, 1, 28, 28))
 
-    make_dot(yhat, params=dict(list(model.named_parameters()))).render(
+    cnn_model = Net().to(device)
+    resnet18_model = models.resnet18().to(device)
+
+    cnn_yhat = cnn_model(torch.rand(1, 1, 28, 28))
+    resnet18_yhat = resnet18_model(torch.rand(1, 3, 224, 224))
+
+    make_dot(cnn_yhat, params=dict(list(cnn_model.named_parameters()))).render(
         "figures/mnist_cnn", format="png"
     )
 
+    make_dot(
+        resnet18_yhat, params=dict(list(resnet18_model.named_parameters()))
+    ).render("figures/resnet18", format="png")
 
-def benchmark(device):
+
+def benchmark(device, resnet=False):
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
-    train_loader, test_loader = load_data(train_kwargs, test_kwargs)
+    train_loader, test_loader = load_data(train_kwargs, test_kwargs, mnist=not resnet)
 
-    model = torch.load("models/mnist_cnn.pt")
+    if resnet:
+        model_save_path = "models/cifar10_resnet18.pt"
+    else:
+        model_save_path = "models/mnist_cnn.pt"
+
+    model = torch.load(model_save_path)
 
     ### Warmup, CUDA typically has overhead on the first run
     for _ in range(5):
-        test(model, device, test_loader)
+        test(model, device, test_loader, criterion)
 
     times = []
     for _ in range(TRIALS):
         tik = time.time()
         test_loss, correct, test_dataset_length, accuracy = test(
-            model, device, test_loader
+            model, device, test_loader, criterion
         )
         tok = time.time()
         total_time = tok - tik
@@ -297,11 +368,15 @@ def benchmark(device):
     exec_times = []
     exec_stds = []
     accuracies = []
-    sparsities = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    sparsities = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]#, 0.7, 0.8, 0.9
 
+    i = 0
     model_fns = glob.glob("models/mnist_cnn_pruned_sparsity_*")
     for model_fn in tqdm(model_fns):
         model = torch.load(model_fn)
+        if i == 6:
+            break
+        i += 1
         model = model.to(device)
 
         times = []
@@ -309,7 +384,7 @@ def benchmark(device):
         for _ in range(TRIALS):
             tik = time.time()
             test_loss, correct, test_dataset_length, accuracy = test(
-                model, device, test_loader
+                model, device, test_loader, criterion
             )
             tok = time.time()
             total_time = tok - tik
@@ -376,16 +451,16 @@ if __name__ == "__main__":
         figures(device)
         benchmark(device)
     elif sys.argv[1] == "train":
-        train_models()
+        train_models(resnet=True, retrain=False)
     elif sys.argv[1] == "prune":
         if device.type == "mps":
             UserWarning("Cannot perform pruning with NNI on MPS mode, fallback to CPU")
             device = torch.device("cpu")
-        prune(device)
+        prune(device, resnet=True)
     elif sys.argv[1] == "figures":
         figures(device)
     elif sys.argv[1] == "benchmark":
-        benchmark(device)
+        benchmark(device, resnet=True)
     else:
         print("Invalid argument")
         print("Example usage: python3 proj1.py train")
