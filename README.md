@@ -19,3 +19,7 @@ conda install "libblas=*=*accelerate"
 
 ## Project 1: DNN Pruning via NNI
 Located in `proj1`
+
+
+The PyTorch project moves rapidly. already had to update from 1.12 to 1.13
+conda update pytorch torchvision  -c pytorch-nightly
