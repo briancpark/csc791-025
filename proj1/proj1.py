@@ -12,7 +12,7 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 from nni.compression.pytorch.pruning import *
 from nni.compression.pytorch.speedup import ModelSpeedup
-from torchviz import make_dot, make_dot_from_trace
+from torchviz import make_dot
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
@@ -41,6 +41,8 @@ seed = 1
 save_model = False
 criterion = nn.CrossEntropyLoss()
 TRIALS = 25
+num_cpus = int(os.cpu_count() / 2)
+sparsities = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 
 # Setup directory and environment variables
 arc_env = os.path.exists("/mnt/beegfs/" + os.environ["USER"])
@@ -54,7 +56,6 @@ if torch.cuda.is_available():
 
     # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
     torch.backends.cudnn.allow_tf32 = True
-    # Run all the project code
 
     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
 
@@ -85,7 +86,7 @@ class Net(nn.Module):
         return output
 
 
-# For benchmarking purposes, we need to add synchonizaiton primitives
+# For benchmarking purposes, we need to add synchronization primitives
 def touch():
     if device.type == "cuda":
         torch.cuda.synchronize()
@@ -170,6 +171,12 @@ def train_models(resnet=False, retrain=False):
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
+    # If we're using NVIDIA, we can apply some more software/hardware optimizations if available
+    if device.type == "cuda":
+        cuda_kwargs = {"num_workers": num_cpus, "pin_memory": True, "shuffle": True}
+        train_kwargs.update(cuda_kwargs)
+        test_kwargs.update(cuda_kwargs)
+
     train_loader, test_loader = load_data(train_kwargs, test_kwargs, mnist=not resnet)
 
     if resnet:
@@ -195,18 +202,12 @@ def train_models(resnet=False, retrain=False):
         scheduler = StepLR(optimizer, step_size=1, gamma=gamma)
         criterion = F.nll_loss
 
-    # If we're using NVIDIA, we can apply some more software/hardware optimizations if available
-    if device.type == "cuda":
-        cuda_kwargs = {"num_workers": 1, "pin_memory": True, "shuffle": True}
-        train_kwargs.update(cuda_kwargs)
-        test_kwargs.update(cuda_kwargs)
-
     for epoch in tqdm(
-            range(1, epochs + 1),
-            position=0,
-            desc="Epochs      ",
-            leave=False,
-            colour="green",
+        range(1, epochs + 1),
+        position=0,
+        desc="Epochs      ",
+        leave=False,
+        colour="green",
     ):
         train(model, device, train_loader, optimizer, criterion, epoch)
         _, _, _, accuracy = test(model, device, test_loader, criterion)
@@ -227,7 +228,7 @@ def train_models(resnet=False, retrain=False):
 
 
 def prune_helper(
-        model, opt_pruner, train_loader, test_loader, sparsity, resnet, opt_pruner_name
+    model, opt_pruner, train_loader, test_loader, sparsity, resnet, opt_pruner_name
 ):
     if resnet:
         config_list = [
@@ -277,11 +278,11 @@ def prune_helper(
 
     optimizer = SGD(model.parameters(), 1e-2)
     for epoch in tqdm(
-            range(1, retrain_epochs + 1),
-            position=0,
-            desc="Epochs      ",
-            leave=False,
-            colour="green",
+        range(1, retrain_epochs + 1),
+        position=0,
+        desc="Epochs      ",
+        leave=False,
+        colour="green",
     ):
         train(model, device, train_loader, optimizer, criterion, epoch)
 
@@ -329,20 +330,19 @@ def prune(device, resnet=False, use_ray=False):
     model = torch.load(model_save_path, map_location=device)
 
     if device.type == "cuda":
-        cuda_kwargs = {"num_workers": 1, "pin_memory": True, "shuffle": True}
+        cuda_kwargs = {"num_workers": num_cpus, "pin_memory": True, "shuffle": True}
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
 
     model = model.to(device)
 
     oids = []
-    sparsities = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 
     if use_ray:
         import ray
 
         # TODO: Tune these parameters to liking depending on hardware environment
-        ray.init(num_gpus=1, include_dashboard=False, num_cpus=8)
+        ray.init(num_gpus=1, include_dashboard=False, num_cpus=num_cpus)
         r = ray.remote(num_gpus=0.25)
         remote_fn = r(prune_helper)
 
@@ -413,13 +413,21 @@ def benchmark(device, pruner_name, resnet=False):
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
+    # If we're using NVIDIA, we can apply some more software/hardware optimizations if available
+    if device.type == "cuda":
+        cuda_kwargs = {"num_workers": num_cpus, "pin_memory": True, "shuffle": True}
+        train_kwargs.update(cuda_kwargs)
+        test_kwargs.update(cuda_kwargs)
+
     train_loader, test_loader = load_data(train_kwargs, test_kwargs, mnist=not resnet)
 
     pruned_model_save_dir = "models/" + pruner_name
 
     if resnet:
         model_save_path = "models/cifar10_resnet101.pt"
-        pruned_model_save_path = pruned_model_save_dir + "/cifar10_resnet101_pruned_sparsity_*"
+        pruned_model_save_path = (
+            pruned_model_save_dir + "/cifar10_resnet101_pruned_sparsity_*"
+        )
 
     else:
         model_save_path = "models/mnist_cnn.pt"
@@ -442,14 +450,16 @@ def benchmark(device, pruner_name, resnet=False):
         tok = time.time()
         total_time = tok - tik
         times.append(total_time)
+        _, _, _, baseline_train_accuracy = test(model, device, train_loader, criterion)
         print(
-            "Average test loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)".format(
-                test_loss, correct, test_dataset_length, accuracy
+            "Average test loss: {:.4f}, Train Accuracy ({:.0f}%), Val Accuracy: {}/{} ({:.0f}%)".format(
+                test_loss,
+                baseline_train_accuracy,
+                correct,
+                test_dataset_length,
+                accuracy,
             )
         )
-
-        _, _, _, baseline_train_accuracy = test(model, device, train_loader, criterion)
-        print("Train accuracy: {:.0f}%".format(baseline_train_accuracy))
 
     baseline_time = sum(times) / len(times)
     baseline_std_time = np.std(times)
@@ -461,17 +471,11 @@ def benchmark(device, pruner_name, resnet=False):
     exec_stds = []
     accuracies = []
     train_accuracies = []
-    sparsities = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]  # , 0.7, 0.8, 0.9]
 
-    # TODO:
-    i = 0
     model_fns = sorted(glob.glob(pruned_model_save_path))
 
     for model_fn in tqdm(model_fns):
         model = torch.load(model_fn, map_location=device)
-        if i == 6:
-            break
-        i += 1
         model = model.to(device)
 
         times = []
@@ -488,15 +492,13 @@ def benchmark(device, pruner_name, resnet=False):
             tok = time.time()
             total_time = tok - tik
             times.append(total_time)
+            _, _, _, train_accuracy = test(model, device, train_loader, criterion)
             tqdm.write(
-                "Average test loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)".format(
-                    test_loss, correct, test_dataset_length, accuracy
+                "Average test loss: {:.4f}, Train Accuracy ({:.0f}%), Val Accuracy: {}/{} ({:.0f}%)".format(
+                    test_loss, train_accuracy, correct, test_dataset_length, accuracy
                 )
             )
             accuracies_subtrials.append(accuracy)
-
-            _, _, _, train_accuracy = test(model, device, train_loader, criterion)
-            tqdm.write("Train accuracy: {:.0f}%".format(train_accuracy))
             training_accuracy_subtrials.append(train_accuracy)
 
         exec_time = sum(times) / len(times)
@@ -598,7 +600,6 @@ if __name__ == "__main__":
 
     elif sys.argv[1] == "benchmark":
         benchmark(device, "L1NormPruner", resnet=False)
-        benchmark(device, "L1NormPruner", resnet=True)
 
     else:
         print("Invalid argument")
