@@ -61,3 +61,4 @@ python3 proj1.py benchmark # benchmark normal vs. pruned DNNs
 If you want to skip training, since it'll take really long, please download the model weights from Google Drive into `/models` directory for  
 [`mnist_cnn.pt`](https://drive.google.com/file/d/177gkGVjz-cOYTy-Z3cqHvA4NFqt69u6i/view?usp=sharing) and
 [`cifar10_resnet101.pt`](https://drive.google.com/file/d/16xlIGMnmTaITuP8AVYB-NtN8JT7w9f8F/view?usp=sharing)
+
