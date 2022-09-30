@@ -193,9 +193,9 @@ def train_models(resnet=False, retrain=False):
     if resnet:
         # CIFAR-10 ResNet-101
         # Reccomended hyperparameters are here: https://discuss.pytorch.org/t/resnet-with-cifar10-only-reaches-86-accuracy-expecting-90/135051
+        optimizer = SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4)
         scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[90, 135])
         criterion = nn.CrossEntropyLoss()
-        optimizer = SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4)
     else:
         # MNIST CNN
         optimizer = optim.Adadelta(model.parameters(), lr=lr)
