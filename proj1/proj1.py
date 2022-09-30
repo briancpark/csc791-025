@@ -204,11 +204,11 @@ def train_models(resnet=False, retrain=False):
         criterion = F.nll_loss
 
     for epoch in tqdm(
-            range(1, epochs + 1),
-            position=0,
-            desc="Epochs      ",
-            leave=False,
-            colour="green",
+        range(1, epochs + 1),
+        position=0,
+        desc="Epochs      ",
+        leave=False,
+        colour="green",
     ):
         train(model, device, train_loader, optimizer, criterion, epoch)
         _, _, _, accuracy = test(model, device, test_loader, criterion)
@@ -229,7 +229,7 @@ def train_models(resnet=False, retrain=False):
 
 
 def prune_helper(
-        model, opt_pruner, train_loader, test_loader, sparsity, resnet, opt_pruner_name
+    model, opt_pruner, train_loader, test_loader, sparsity, resnet, opt_pruner_name
 ):
     if resnet:
         config_list = [
@@ -279,11 +279,11 @@ def prune_helper(
 
     optimizer = SGD(model.parameters(), 1e-2)
     for epoch in tqdm(
-            range(1, retrain_epochs + 1),
-            position=0,
-            desc="Epochs      ",
-            leave=False,
-            colour="green",
+        range(1, retrain_epochs + 1),
+        position=0,
+        desc="Epochs      ",
+        leave=False,
+        colour="green",
     ):
         train(model, device, train_loader, optimizer, criterion, epoch)
 
@@ -426,7 +426,9 @@ def benchmark(device, pruner_name, resnet=False):
 
     if resnet:
         model_save_path = "models/cifar10_resnet101.pt"
-        pruned_model_save_path = pruned_model_save_dir + "/cifar10_resnet101_pruned_sparsity_*"
+        pruned_model_save_path = (
+            pruned_model_save_dir + "/cifar10_resnet101_pruned_sparsity_*"
+        )
 
     else:
         model_save_path = "models/mnist_cnn.pt"
@@ -452,7 +454,11 @@ def benchmark(device, pruner_name, resnet=False):
         _, _, _, baseline_train_accuracy = test(model, device, train_loader, criterion)
         print(
             "Average test loss: {:.4f}, Train Accuracy ({:.0f}%), Val Accuracy: {}/{} ({:.0f}%)".format(
-                test_loss, baseline_train_accuracy, correct, test_dataset_length, accuracy
+                test_loss,
+                baseline_train_accuracy,
+                correct,
+                test_dataset_length,
+                accuracy,
             )
         )
 
@@ -467,10 +473,15 @@ def benchmark(device, pruner_name, resnet=False):
     accuracies = []
     train_accuracies = []
 
+    # TODO:
+    i = 0
     model_fns = sorted(glob.glob(pruned_model_save_path))
 
     for model_fn in tqdm(model_fns):
         model = torch.load(model_fn, map_location=device)
+        if i == 6:
+            break
+        i += 1
         model = model.to(device)
 
         times = []
@@ -489,7 +500,7 @@ def benchmark(device, pruner_name, resnet=False):
             times.append(total_time)
             _, _, _, train_accuracy = test(model, device, train_loader, criterion)
             tqdm.write(
-                "Average test loss: {:.4f}, Train Accuracy ({:.0f}%), Accuracy: {}/{} ({:.0f}%)".format(
+                "Average test loss: {:.4f}, Train Accuracy ({:.0f}%), Val Accuracy: {}/{} ({:.0f}%)".format(
                     test_loss, train_accuracy, correct, test_dataset_length, accuracy
                 )
             )
