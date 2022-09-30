@@ -86,7 +86,7 @@ class Net(nn.Module):
         return output
 
 
-# For benchmarking purposes, we need to add synchonizaiton primitives
+# For benchmarking purposes, we need to add synchronization primitives
 def touch():
     if device.type == "cuda":
         torch.cuda.synchronize()
@@ -472,15 +472,10 @@ def benchmark(device, pruner_name, resnet=False):
     accuracies = []
     train_accuracies = []
 
-    # TODO:
-    i = 0
     model_fns = sorted(glob.glob(pruned_model_save_path))
 
     for model_fn in tqdm(model_fns):
         model = torch.load(model_fn, map_location=device)
-        if i == 6:
-            break
-        i += 1
         model = model.to(device)
 
         times = []
