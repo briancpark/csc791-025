@@ -12,7 +12,7 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 from nni.compression.pytorch.pruning import *
 from nni.compression.pytorch.speedup import ModelSpeedup
-from torchviz import make_dot, make_dot_from_trace
+from torchviz import make_dot
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
