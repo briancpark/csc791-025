@@ -46,7 +46,6 @@ sparsities = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 
 # Setup directory and environment variables
 arc_env = os.path.exists("/mnt/beegfs/" + os.environ["USER"])
-arc_env = False
 os.system("mkdir -p figures")
 os.system("mkdir -p models")
 
