@@ -32,11 +32,12 @@ For ARC, we used the NVIDIA A100 GPU \cite{a100}. It has 80GB of HBM and it clai
 
 
 \subsection{Pruning Configuration}
-For the pruning configurations, we used \verb|L1NormPruner| on the simple MNIST CNN as outlined by the NNI QuickStart Guide. We retrained for 3 more epochs after the pruning step.
+For the pruning configurations, we used \verb|L1NormPruner| on the simple MNIST CNN as outlined by the NNI QuickStart Guide. We retrained for 3 more epochs after the pruning step. We tried pruning \verb|Conv2d| and \verb|Linear| leaving the last layer excluded for pruning. We experimented with \verb|L1NormPruner| and \verb|L2NormPruner|, but found \verb|L1NormPruner| the best in terms of accuracy.
 
-For the second model, we chose ResNet-101, which is a much deeper DNN. We wanted to see the effects that residual connections have on deep neural networks. We used the CIFAR-10 dataset as that's a relatively more challenging dataset than MNIST. As for which pruner we used, we brute forced the search for the best pruning method. Training multiple pruning methods on the same dataset is an embarrassingly parallel problem, so we used Ray to exploit this parallelism on the A100 GPU \cite{ray}. Ray is a distributed framework for scaling AI and Python applications. Since there is no communication between the training processes, we really could've used any other distributed programming framework. But we chose Ray as it has GPU support, and it's able to support multi process Python execution on a single GPU. We see that once we train in parallel, we can fully utilize the memory usage as well as the GPU utilization as shown in the output of \verb|nvidia-smi| in Figure \ref{fig:nvidiasmi}. We retrained for 20 more epochs after the pruning step, since this is a much deeper network.
+For the second model, we chose ResNet-101, which is a much deeper DNN. We wanted to see the effects that residual connections have on deep neural networks. We used the CIFAR-10 dataset as that's a relatively more challenging dataset than MNIST. As for which pruner we used, we brute forced the search for the best pruning method. Training multiple pruning methods on the same dataset is an embarrassingly parallel problem, so we used Ray to exploit this parallelism on the A100 GPU \cite{ray}. Ray is a distributed framework for scaling AI and Python applications. Since there is no communication between the training processes, we really could've used any other distributed programming framework. But we chose Ray as it has GPU support, and it's able to support multi process Python execution on a single GPU. We see that once we train in parallel, we can fully utilize the memory usage as well as the GPU utilization as shown in the output of \verb|nvidia-smi| in Figure \ref{fig:nvidiasmi}. We retrained for 20 more epochs after the pruning step, since this is a much deeper network. We experimented with \verb|LevelPruner|, \verb|L1NormPruner|, \verb|L2NormPruner|. We found that pruning with only \verb|Conv2d| and excluding the last layer showed the best results.
 
-For both networks, we pruned from 10\% to 90\% with intervals of 10\%. We experimented with pruners such as \verb|LevelPruner|, \verb|L1NormPruner|, \verb|L2NormPruner| \cite{levelpruner, l1prune}.
+For both networks, we pruned from 10\% to 90\% sparsity ratios with intervals of 10\%. We experimented with pruners such as \verb|LevelPruner|, \verb|L1NormPruner|, \verb|L2NormPruner| \cite{levelpruner, l1prune}. 
+
 
 \begin{figure}
     \centerline{\includegraphics[width=6in]{../proj1/figures/nvidia-smi_pruning.png}}
@@ -56,7 +57,7 @@ For both networks, we pruned from 10\% to 90\% with intervals of 10\%. We experi
     \label{fig:dnngraph}
 \end{figure}
 
-The outputs of \verb|print(model)| is shown for \hyperref[sec:A1]{Simple CNN} and \hyperref[sec:A2]{ResNet-18} in Appendix A. For visuals, we outputted the graph of the DNNs as well in Figure \ref{fig:dnngraph}. Note that although we used ResNet-101 for the report, the print output and computation graph are showing ResNet-18 for readability.
+The outputs of \verb|print(model)| is shown for \hyperref[sec:A1]{Simple CNN} and \hyperref[sec:A2]{ResNet-18} in Appendix A. For visuals, we outputted the graph of the DNNs as well in Figure \ref{fig:dnngraph}. Note that although we used ResNet-101 for the report, the print output and computation graph are showing ResNet-18 for readability. For the Simple CNN, we show both the outputs before and after pruning.
 
 After training each model, we benchmarked both models for their inference time as a baseline. Then we used NNI to prune as aggressively as we could to showcase the performance vs. accuracy degradation trade-off. Unfortunately, we could not run the pruning process on the M1 MacBook Pro as the \href{https://github.com/pytorch/pytorch/issues/78915}{top $k$ function is not supported with MPS backend for Apple Silicon}. Thus we could not run NNI unless we changed the source code to avoid this issue.
 
@@ -80,9 +81,20 @@ The results are shown in Figure \ref{fig:a100benchmark} for NVIDIA A100 GPU. We 
     \label{fig:m1benchmark}
 \end{figure}
 
-For M1 Mac, we're able to transfer the ResNet-101 weights from the node with the A100 we trained on. Then we ran just the inference models and got the results as reported in Figure \ref{fig:m1benchmark}. There seems to be less variance for the inference times on the M1 Mac. We don't know the root cause of this difference as the PyTorch backend for M1 is still in early stages of development. Another thing to keep in mind is that we don't see any synchronization primitives for the MPS kernels, and we're not exactly sure if the MPS GPU kernels are synchronous, or asynchronous like CUDA. The A100 inference time is also much more flat and variance is much higher. We suspect that this might be due to overhead of memory transfer of the dataset from main memory to GPU HBM, making this memory bounded for such a small model. We don't see this effect in M1, as the memory between GPU and CPU is \textit{unified}, or shared.
+For M1 Mac, we're able to transfer the ResNet-101 weights from the node with the A100 we trained on. Then we ran just the inference models and got the results as reported in Figure \ref{fig:m1benchmark}. Another thing to keep in mind is that we don't see any synchronization primitives for the MPS kernels, and we're not exactly sure if the MPS GPU kernels are synchronous, or asynchronous like CUDA. The A100 inference time is also much more flat. We suspect that this might be due to overhead of memory transfer of the dataset from main memory to GPU HBM, making this memory bounded for such a small model. We don't see this effect in M1, as the memory between GPU and CPU is \textit{unified}, or shared.
 
-For accuracy, the simple CNN degrades pretty quickly as the network becomes more sparse. This is what we expected to see. But interestingly the accuracy of ResNet-101 actually increases significantly. We're seeing training accuracy increase from 84\% to 96\% and validation accuracy increase from 79\% to 86\%. Both of the accuracies then start to degrade as the model becomes more sparse. The only suspicion is that retraining for 20 more epochs helped the model become more accurate. We wish to do more thorough analysis of why this happens, if time permits.
+
+For accuracy, the simple CNN degrades pretty quickly as the network becomes more sparse. This is what we expected to see. But interestingly the accuracy of ResNet-101 actually increases significantly. We're seeing training accuracy increase from 84\% to 96\% and validation accuracy increase from 79\% to 86\%. Both of the accuracies then start to degrade as the model becomes more sparse. The only suspicion is that retraining for 20 more epochs helped the model become more accurate. We also report our benchmarks for the \verb|L2NormPruner| and \verb|LevelPruner| in Figure \ref{fig:otherpruner}. The results are not comprehensive, as we didn't tune the configurations and parameters compared to \verb|L1NormPruner|. We wish to do more thorough analysis of why this happens, if time permits.
+
+\begin{figure}
+    \centerline{
+        \includegraphics[width=4in]{../proj1/figures/resnet101_benchmark_l2.png}
+        \includegraphics[width=4in]{../proj1/figures/resnet101_benchmark_level.png}
+    }
+    \caption{ResNet-101 Benchmark for L2NormPruner (left) and LevelPruner (right) on NVIDIA A100}
+    \label{fig:otherpruner}
+\end{figure}
+
 
 \section{Lessons Learned}
 %(4) What lessons you have learned through the project;
@@ -113,6 +125,17 @@ Net(
   (dropout2): Dropout(p=0.5, inplace=False)
   (fc1): Linear(in_features=4608, out_features=64, bias=True)
   (fc2): Linear(in_features=64, out_features=10, bias=True)
+)
+\end{verbatim}
+With 60\% Pruning ratio:
+\begin{verbatim}
+Net(
+  (conv1): Conv2d(1, 3, kernel_size=(3, 3), stride=(1, 1))
+  (conv2): Conv2d(3, 4, kernel_size=(3, 3), stride=(1, 1))
+  (dropout1): Dropout(p=0.25, inplace=False)
+  (dropout2): Dropout(p=0.5, inplace=False)
+  (fc1): Linear(in_features=576, out_features=8, bias=True)
+  (fc2): Linear(in_features=8, out_features=10, bias=True)
 )
 \end{verbatim}
 
