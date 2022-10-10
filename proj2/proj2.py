@@ -1,6 +1,7 @@
 import torch
 import sys
 import os
+import csv
 import glob
 import time
 
@@ -15,6 +16,14 @@ from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 import torchvision.models as models
+
+from nni.algorithms.compression.pytorch.quantization import (
+    NaiveQuantizer,
+    QAT_Quantizer,
+    DoReFaQuantizer,
+    BNNQuantizer,
+    ObserverQuantizer,
+)
 
 device = torch.device(
     "mps"
@@ -40,12 +49,13 @@ save_model = False
 criterion = nn.CrossEntropyLoss()
 TRIALS = 25
 num_cpus = int(os.cpu_count() / 2)
-sparsities = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+
 
 # Setup directory and environment variables
 arc_env = os.path.exists("/mnt/beegfs/" + os.environ["USER"])
 os.system("mkdir -p figures")
 os.system("mkdir -p models")
+os.system("mkdir -p logs")
 
 if torch.cuda.is_available():
     # The flag below controls whether to allow TF32 on matmul. This flag defaults to False
@@ -165,7 +175,7 @@ def load_data(train_kwargs, test_kwargs, mnist=True):
     return train_loader, test_loader
 
 
-def train_models(resnet=False, retrain=False):
+def train_models(resnet=False, quantizer="", retrain=False):
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
@@ -178,11 +188,21 @@ def train_models(resnet=False, retrain=False):
     train_loader, test_loader = load_data(train_kwargs, test_kwargs, mnist=not resnet)
 
     if resnet:
-        model_save_path = "models/cifar10_resnet101.pt"
-        model = models.resnet101().to(device)
+        if quantizer:
+            model_save_path = "models/" + quantizer + "/cifar10_resnet101_quantized.pt"
+            model = torch.load(model_save_path, map_location=device)
+        else:
+            model_save_path = "models/cifar10_resnet101.pt"
+            model = models.resnet101().to(device)
+        logger_fn = "logs/cifar10_resnet101_" + quantizer + ".csv"
     else:
-        model_save_path = "models/mnist_cnn.pt"
-        model = Net().to(device)
+        if quantizer:
+            model_save_path = "models/" + quantizer + "/mnist_cnn_quantized.pt"
+            model = torch.load(model_save_path, map_location=device)
+        else:
+            model_save_path = "models/mnist_cnn.pt"
+            model = Net().to(device)
+        logger_fn = "logs/mnist_cnn_" + quantizer + ".csv"
 
     # If we were in the middle of training, reload the model.
     if os.path.exists(model_save_path) or retrain:
@@ -200,6 +220,23 @@ def train_models(resnet=False, retrain=False):
         scheduler = StepLR(optimizer, step_size=1, gamma=gamma)
         criterion = F.nll_loss
 
+    # For logging purposes
+    if not os.path.exists(logger_fn):
+        with open(logger_fn, "w", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(
+                [
+                    "train_loss",
+                    "train_correct",
+                    "train_dataset_length",
+                    "train_accuracy",
+                    "test_loss",
+                    "test_correct",
+                    "test_dataset_length",
+                    "test_accuracy",
+                ]
+            )
+
     for epoch in tqdm(
         range(1, epochs + 1),
         position=0,
@@ -208,12 +245,35 @@ def train_models(resnet=False, retrain=False):
         colour="green",
     ):
         train(model, device, train_loader, optimizer, criterion, epoch)
-        _, _, _, accuracy = test(model, device, test_loader, criterion)
-        tqdm.write("Accuracy: %.4f" % accuracy)
+        train_loss, train_correct, train_dataset_length, train_accuracy = test(
+            model, device, test_loader, criterion
+        )
+        test_loss, test_correct, test_dataset_length, test_accuracy = test(
+            model, device, train_loader, criterion
+        )
+
+        # For logging purposes
+        with open(logger_fn, "a") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(
+                [
+                    train_loss,
+                    train_correct,
+                    train_dataset_length,
+                    train_accuracy,
+                    test_loss,
+                    test_correct,
+                    test_dataset_length,
+                    test_accuracy,
+                ]
+            )
+        tqdm.write("Accuracy: %.4f" % test_accuracy)
         scheduler.step()
 
         ### Update the weights and save the model
         torch.save(model, model_save_path)
+        if test_accuracy > 99.0:
+            break
 
     test_loss, correct, test_dataset_length, accuracy = test(
         model, device, test_loader, criterion
@@ -225,38 +285,132 @@ def train_models(resnet=False, retrain=False):
     )
 
 
-
-
-def quantize(device, resnet=False):
+def quantize(device, quantizer, resnet=False):
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
     train_loader, test_loader = load_data(train_kwargs, test_kwargs, mnist=not resnet)
-
-    if resnet:
-        model_save_path = "models/cifar10_resnet101.pt"
-    else:
-        model_save_path = "models/mnist_cnn.pt"
-
-    model = torch.load(model_save_path, map_location=device)
 
     if device.type == "cuda":
         cuda_kwargs = {"num_workers": num_cpus, "pin_memory": True, "shuffle": True}
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
 
-    model = models.resnet101().to(device)
-    from nni.algorithms.compression.pytorch.quantization import BNNQuantizer
+    os.system("mkdir -p models/" + quantizer)
 
-    config_list = [
-        {'quant_types': ['weight', 'input'], 'quant_bits': {'weight': 16, 'input': 16}, 'op_types': ['Conv2d']}]
+    if quantizer == "ObserverQuantizer":
+        # Observer Quantizer is the only one that is done post-training
+        if resnet:
+            model = torch.load("models/cifar10_resnet101.pt", map_location=device)
+        else:
+            model = torch.load("models/mnist_cnn.pt", map_location=device)
+
+        config_list = [
+            {
+                "quant_types": ["weight", "input"],
+                "quant_bits": {"weight": 8, "input": 8},
+                "op_types": ["Conv2d", "Linear"],
+            }
+        ]
+        quantizer = ObserverQuantizer(model, config_list)
+
+        def calibration(model, train_loader):
+            model.eval()
+
+            with torch.no_grad():
+                for data, _ in train_loader:
+                    model(data)
+
+        calibration(model, train_loader)
+        quantizer.compress()
+
+        if resnet:
+            torch.save(model, "models/ObserverQuantizer/cifar10_resnet101_quantized.pt")
+        else:
+            torch.save(model, "models/ObserverQuantizer/mnist_cnn_quantized.pt")
+
+        return
+
+    if resnet:
+        model = models.resnet101().to(device)
+        model_save_path = "models/" + quantizer + "/cifar10_resnet101"
+    else:
+        model = Net().to(device)
+        model_save_path = "models/" + quantizer + "/mnist_cnn"
+
+    print(model)
+
+    op_types = ["Conv2d", "Linear"]
     optimizer = optim.Adadelta(model.parameters(), lr=lr)
-    quantizer = BNNQuantizer(model, config_list, optimizer)
+
+    if quantizer == "NaiveQuantizer":
+        quant_bits = 8
+
+        config_list = [
+            {
+                "quant_types": ["weight"],
+                "quant_bits": {
+                    "weight": quant_bits,
+                },
+                "op_types": op_types,
+            }
+        ]
+
+        quantizer = NaiveQuantizer(model, config_list)
+
+    elif quantizer == "BNNQuantizer":
+        quant_bits = 1
+
+        config_list = [
+            {
+                "quant_types": ["weight"],
+                "quant_bits": {"weight": quant_bits},
+                "op_types": op_types,
+            }
+        ]
+
+        quantizer = BNNQuantizer(model, config_list, optimizer)
+
+    elif quantizer == "DoReFaQuantizer":
+        quant_bits = 8
+
+        config_list = [
+            {
+                "quant_types": ["weight"],
+                "quant_bits": {"weight": quant_bits},
+                "op_types": op_types,
+            }
+        ]
+
+        quantizer = DoReFaQuantizer(model, config_list, optimizer)
+
+    elif quantizer == "QAT_Quantizer":
+        if resnet:
+            dummy_input = torch.rand(1, 3, 224, 224).to(device)
+        else:
+            dummy_input = torch.rand(1, 1, 28, 28).to(device)
+
+        quant_bits = 8
+
+        config_list = [
+            {
+                "quant_types": ["weight"],
+                "quant_bits": {"weight": quant_bits},
+                "op_types": op_types,
+            }
+        ]
+
+        quantizer = QAT_Quantizer(
+            model, config_list, optimizer, dummy_input=dummy_input
+        )
+
     quantizer.compress()
 
+    print(model)
 
+    quantized_model_save_path = model_save_path + "_quantized.pt"
 
-
+    torch.save(model, quantized_model_save_path)
 
 
 def figures(device):
@@ -449,14 +603,24 @@ if __name__ == "__main__":
         train_models(resnet=False)
 
     elif sys.argv[1] == "train":
-        train_models(resnet=True, retrain=False)
+        train_models(resnet=False, quantizer="NaiveQuantizer")
+        train_models(resnet=False, quantizer="BNNQuantizer")
+        train_models(resnet=False, quantizer="QAT_Quantizer")
+        train_models(resnet=False, quantizer="DoReFaQuantizer")
 
     elif sys.argv[1] == "quantize":
-        #TODO: Ignore this unless I error on Mac
-        # if device.type == "mps":
-        #     UserWarning("Cannot perform pruning with NNI on MPS mode, fallback to CPU")
-        #     device = torch.device("cpu")
-        quantize(device, resnet=False)
+        device = torch.device("cpu")
+        quantize(device, "NaiveQuantizer", resnet=False)
+        quantize(device, "BNNQuantizer", resnet=False)
+        quantize(device, "QAT_Quantizer", resnet=False)
+        quantize(device, "DoReFaQuantizer", resnet=False)
+        quantize(device, "ObserverQuantizer", resnet=False)
+
+        quantize(device, "NaiveQuantizer", resnet=True)
+        quantize(device, "BNNQuantizer", resnet=True)
+        quantize(device, "QAT_Quantizer", resnet=True)
+        quantize(device, "DoReFaQuantizer", resnet=True)
+        quantize(device, "ObserverQuantizer", resnet=True)
 
     else:
         print("Invalid argument")
