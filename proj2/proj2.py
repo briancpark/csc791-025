@@ -14,8 +14,10 @@ from torch.optim.lr_scheduler import StepLR
 from torchviz import make_dot
 from tqdm import tqdm
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import torchvision.models as models
+from pathlib import Path
 
 from nni.algorithms.compression.pytorch.quantization import (
     NaiveQuantizer,
@@ -47,7 +49,7 @@ gamma = 0.7
 seed = 1
 save_model = False
 criterion = nn.CrossEntropyLoss()
-TRIALS = 25
+TRIALS = 5
 num_cpus = int(os.cpu_count() / 2)
 
 
@@ -246,10 +248,10 @@ def train_models(resnet=False, quantizer="", retrain=False):
     ):
         train(model, device, train_loader, optimizer, criterion, epoch)
         train_loss, train_correct, train_dataset_length, train_accuracy = test(
-            model, device, test_loader, criterion
+            model, device, train_loader, criterion
         )
         test_loss, test_correct, test_dataset_length, test_accuracy = test(
-            model, device, train_loader, criterion
+            model, device, test_loader, criterion
         )
 
         # For logging purposes
@@ -414,6 +416,7 @@ def quantize(device, quantizer, resnet=False):
 
 
 def figures(device):
+    # Plot the computational graphs of the models
     if device.type == "mps":
         UserWarning("Cannot generate graphs on MPS mode, fallback to CPU")
         device = torch.device("cpu")
@@ -432,8 +435,70 @@ def figures(device):
         resnet18_yhat, params=dict(list(resnet18_model.named_parameters()))
     ).render("figures/resnet18", format="png")
 
+    # For BNN, print the number of ones and negative ones in the weights
+    model_fns = [
+        "models/BNNQuantizer/cifar10_resnet101_quantized.pt",
+        "models/BNNQuantizer/mnist_cnn_quantized.pt",
+    ]
 
-def benchmark(device, pruner_name, resnet=False):
+    for model_fn in model_fns:
+        model = torch.load(model_fn, map_location=device)
+        layers = [module for module in model.modules()]
+
+        ones, neg_ones = 0, 0
+        for layer in layers:
+            if layer.__class__.__name__ == "QuantizerModuleWrapper":
+                ones += torch.sum(layer.module.weight.data == 1).item()
+                neg_ones += torch.sum(layer.module.weight.data == -1).item()
+
+        print("Number of 1s: {}, Number of -1s: {}".format(ones, neg_ones))
+        # Plot the accuracy and loss graphs
+        files = os.listdir("logs")
+
+    for file in files:
+        fn = "logs/" + str(Path(file))
+        save_fn = "figures/" + Path(file).stem + ".png"
+        quantizer = Path(file).stem.split("_")[-1]
+        df = pd.read_csv(fn)
+        epochs = list(range(1, len(df) + 1))
+
+        plt.figure(figsize=(10, 10), dpi=400)
+        ax1 = plt.subplot()
+        p0 = ax1.plot(
+            epochs, df[["train_accuracy"]], label="Training Accuracy", color="blue"
+        )
+        p1 = ax1.plot(
+            epochs, df[["test_accuracy"]], label="Validation Accuracy", color="green"
+        )
+        plt.xlabel("Epochs")
+        plt.ylabel("Accuracy (%)")
+
+        ax2 = ax1.twinx()
+        p2 = ax2.plot(epochs, df[["train_loss"]], label="Training Loss", color="orange")
+        p3 = ax2.plot(epochs, df[["test_loss"]], label="Validation Loss", color="red")
+        plt.ylabel("Loss")
+
+        leg = p0 + p1 + p2 + p3
+        labs = [l.get_label() for l in leg]
+        ax1.legend(leg, labs, loc="center right")
+
+        model_type = str(Path(file)).split("_")[0]
+        if model_type == "cifar10":
+            model_title = "CIFAR-10 ResNet-101"
+        else:
+            model_title = "MNIST CNN"
+
+        plt.title(
+            model_title
+            + " Quantization with "
+            + quantizer
+            + " Training and Validation Accuracy/Loss Over Epochs"
+        )
+        plt.savefig(save_fn)
+        plt.clf()
+
+
+def benchmark(device, resnet=False):
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
@@ -445,17 +510,10 @@ def benchmark(device, pruner_name, resnet=False):
 
     train_loader, test_loader = load_data(train_kwargs, test_kwargs, mnist=not resnet)
 
-    pruned_model_save_dir = "models/" + pruner_name
-
     if resnet:
         model_save_path = "models/cifar10_resnet101.pt"
-        pruned_model_save_path = (
-            pruned_model_save_dir + "/cifar10_resnet101_pruned_sparsity_*"
-        )
-
     else:
         model_save_path = "models/mnist_cnn.pt"
-        pruned_model_save_path = pruned_model_save_dir + "/mnist_cnn_pruned_sparsity_*"
 
     model = torch.load(model_save_path, map_location=device)
 
@@ -496,11 +554,21 @@ def benchmark(device, pruner_name, resnet=False):
     accuracies = []
     train_accuracies = []
 
-    model_fns = sorted(glob.glob(pruned_model_save_path))
+    # Based on our training session, we pick the ones that actually trained properly
+    if resnet:
+        model_fns = [
+            "models/DoReFaQuantizer/cifar10_resnet101_quantized.pt",
+            "models/BNNQuantizer/cifar10_resnet101_quantized.pt",
+        ]
+    else:
+        model_fns = [
+            "models/DoReFaQuantizer/mnist_cnn_quantized.pt",
+            "models/NaiveQuantizer/mnist_cnn_quantized.pt",
+            "models/QAT_Quantizer/mnist_cnn_quantized.pt",
+        ]
 
     for model_fn in tqdm(model_fns):
         model = torch.load(model_fn, map_location=device)
-        model = model.to(device)
 
         times = []
         accuracies_subtrials = []
@@ -538,63 +606,63 @@ def benchmark(device, pruner_name, resnet=False):
         train_accuracies.append(training_accuracy_avg)
 
         tqdm.write("Average time: {0}".format(sum(times) / len(times)))
-
-    # Convert to numpy arrays for vectorization computation
-    accuracies = np.array(accuracies)
-    exec_times = np.array(exec_times)
-    exec_stds = np.array(exec_stds)
-
-    # Plot the results
-    plt.figure(figsize=(10, 10), dpi=400)
-    ax1 = plt.subplot()
-    p0 = ax1.plot(sparsities, exec_times, label="Inference Time")
-    ax1.fill_between(
-        sparsities,
-        exec_times - exec_stds,
-        exec_times + exec_stds,
-        color="blue",
-        alpha=0.2,
-    )
-    p1 = ax1.plot(
-        sparsities,
-        [baseline_time for _ in sparsities],
-        color="blue",
-        linestyle="--",
-        label="Baseline Inference Time (No Pruning)",
-    )
-    plt.xlabel("Pruning (%)")
-    plt.ylabel("Inference Time (s)")
-
-    ax2 = ax1.twinx()
-    p2 = ax2.plot(sparsities, accuracies, label="Validation Accuracy", color="green")
-    p3 = ax2.plot(
-        sparsities,
-        [baseline_accuracy for _ in sparsities],
-        color="green",
-        linestyle="--",
-        label="Baseline Validation Accuracy (No Pruning)",
-    )
-    p4 = ax2.plot(
-        sparsities, train_accuracies, label="Training Accuracy", color="orange"
-    )
-    p5 = ax2.plot(
-        sparsities,
-        [baseline_train_accuracy for _ in sparsities],
-        color="orange",
-        linestyle="--",
-        label="Baseline Training Accuracy (No Pruning)",
-    )
-
-    plt.ylabel("Accuracy (%)")
-    leg = p0 + p1 + p2 + p3 + p4 + p5
-    labs = [l.get_label() for l in leg]
-    ax1.legend(leg, labs, loc="lower left")
-    if resnet:
-        plt.title("CIFAR-10 ResNet-101 Pruning Benchmark (Inference Time and Accuracy)")
-        plt.savefig("figures/resnet101_benchmark.png")
-    else:
-        plt.title("MNIST CNN Pruning Benchmark (Inference Time and Accuracy)")
-        plt.savefig("figures/mnist_cnn_benchmark.png")
+    #
+    # # Convert to numpy arrays for vectorization computation
+    # accuracies = np.array(accuracies)
+    # exec_times = np.array(exec_times)
+    # exec_stds = np.array(exec_stds)
+    #
+    # # Plot the results
+    # plt.figure(figsize=(10, 10), dpi=400)
+    # ax1 = plt.subplot()
+    # p0 = ax1.plot(sparsities, exec_times, label="Inference Time")
+    # ax1.fill_between(
+    #     sparsities,
+    #     exec_times - exec_stds,
+    #     exec_times + exec_stds,
+    #     color="blue",
+    #     alpha=0.2,
+    # )
+    # p1 = ax1.plot(
+    #     sparsities,
+    #     [baseline_time for _ in sparsities],
+    #     color="blue",
+    #     linestyle="--",
+    #     label="Baseline Inference Time (No Pruning)",
+    # )
+    # plt.xlabel("Pruning (%)")
+    # plt.ylabel("Inference Time (s)")
+    #
+    # ax2 = ax1.twinx()
+    # p2 = ax2.plot(sparsities, accuracies, label="Validation Accuracy", color="green")
+    # p3 = ax2.plot(
+    #     sparsities,
+    #     [baseline_accuracy for _ in sparsities],
+    #     color="green",
+    #     linestyle="--",
+    #     label="Baseline Validation Accuracy (No Pruning)",
+    # )
+    # p4 = ax2.plot(
+    #     sparsities, train_accuracies, label="Training Accuracy", color="orange"
+    # )
+    # p5 = ax2.plot(
+    #     sparsities,
+    #     [baseline_train_accuracy for _ in sparsities],
+    #     color="orange",
+    #     linestyle="--",
+    #     label="Baseline Training Accuracy (No Pruning)",
+    # )
+    #
+    # plt.ylabel("Accuracy (%)")
+    # leg = p0 + p1 + p2 + p3 + p4 + p5
+    # labs = [l.get_label() for l in leg]
+    # ax1.legend(leg, labs, loc="lower left")
+    # if resnet:
+    #     plt.title("CIFAR-10 ResNet-101 Pruning Benchmark (Inference Time and Accuracy)")
+    #     plt.savefig("figures/resnet101_benchmark.png")
+    # else:
+    #     plt.title("MNIST CNN Pruning Benchmark (Inference Time and Accuracy)")
+    #     plt.savefig("figures/mnist_cnn_benchmark.png")
 
 
 if __name__ == "__main__":
@@ -603,10 +671,10 @@ if __name__ == "__main__":
         train_models(resnet=False)
 
     elif sys.argv[1] == "train":
-        train_models(resnet=False, quantizer="NaiveQuantizer")
-        train_models(resnet=False, quantizer="BNNQuantizer")
-        train_models(resnet=False, quantizer="QAT_Quantizer")
-        train_models(resnet=False, quantizer="DoReFaQuantizer")
+        train_models(resnet=True, quantizer="NaiveQuantizer")
+        # train_models(resnet=False, quantizer="BNNQuantizer")
+        # train_models(resnet=False, quantizer="QAT_Quantizer")
+        # train_models(resnet=False, quantizer="DoReFaQuantizer")
 
     elif sys.argv[1] == "quantize":
         device = torch.device("cpu")
@@ -621,6 +689,12 @@ if __name__ == "__main__":
         quantize(device, "QAT_Quantizer", resnet=True)
         quantize(device, "DoReFaQuantizer", resnet=True)
         quantize(device, "ObserverQuantizer", resnet=True)
+
+    elif sys.argv[1] == "figures":
+        figures(device)
+
+    elif sys.argv[1] == "benchmark":
+        benchmark(device, resnet=True)
 
     else:
         print("Invalid argument")
