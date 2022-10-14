@@ -622,7 +622,9 @@ def benchmark(device, resnet=False):
     plt.xticks([r + barWidth for r in range(len(model_names))], model_names)
 
     if resnet:
-        plt.title("CIFAR-10 ResNet-101 Quantization Benchmark (Inference Time and Accuracy)")
+        plt.title(
+            "CIFAR-10 ResNet-101 Quantization Benchmark (Inference Time and Accuracy)"
+        )
         plt.savefig("figures/resnet101_benchmark.png")
     else:
         plt.title("MNIST CNN Pruning Benchmark (Inference Time and Accuracy)")
