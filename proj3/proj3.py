@@ -262,7 +262,6 @@ def train_models(resnet=False, quantizer="", retrain=False):
 def hpo(device):
     model = models.resnet101().to(device)
 
-
     print("Starting HPO")
     return
     # train_kwargs = {"batch_size": batch_size}
