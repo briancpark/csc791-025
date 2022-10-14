@@ -9,3 +9,5 @@ numpy
 pandas
 matplotlib
 nvidia-tensorrt
+onnx
+pycuda
