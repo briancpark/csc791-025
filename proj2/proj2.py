@@ -2,7 +2,6 @@ import torch
 import sys
 import os
 import csv
-import glob
 import time
 
 import torch.nn as nn
@@ -51,7 +50,6 @@ save_model = False
 criterion = nn.CrossEntropyLoss()
 TRIALS = 5
 num_cpus = int(os.cpu_count() / 2)
-
 
 # Setup directory and environment variables
 arc_env = os.path.exists("/mnt/beegfs/" + os.environ["USER"])
@@ -556,11 +554,13 @@ def benchmark(device, resnet=False):
 
     # Based on our training session, we pick the ones that actually trained properly
     if resnet:
+        model_names = ["DoReFaQuantizer", "BNNQuantizer"]
         model_fns = [
             "models/DoReFaQuantizer/cifar10_resnet101_quantized.pt",
             "models/BNNQuantizer/cifar10_resnet101_quantized.pt",
         ]
     else:
+        model_names = ["DoReFaQuantizer", "NaiveQuantizer", "QAT_Quantizer"]
         model_fns = [
             "models/DoReFaQuantizer/mnist_cnn_quantized.pt",
             "models/NaiveQuantizer/mnist_cnn_quantized.pt",
@@ -606,63 +606,27 @@ def benchmark(device, resnet=False):
         train_accuracies.append(training_accuracy_avg)
 
         tqdm.write("Average time: {0}".format(sum(times) / len(times)))
-    #
-    # # Convert to numpy arrays for vectorization computation
-    # accuracies = np.array(accuracies)
-    # exec_times = np.array(exec_times)
-    # exec_stds = np.array(exec_stds)
-    #
-    # # Plot the results
-    # plt.figure(figsize=(10, 10), dpi=400)
-    # ax1 = plt.subplot()
-    # p0 = ax1.plot(sparsities, exec_times, label="Inference Time")
-    # ax1.fill_between(
-    #     sparsities,
-    #     exec_times - exec_stds,
-    #     exec_times + exec_stds,
-    #     color="blue",
-    #     alpha=0.2,
-    # )
-    # p1 = ax1.plot(
-    #     sparsities,
-    #     [baseline_time for _ in sparsities],
-    #     color="blue",
-    #     linestyle="--",
-    #     label="Baseline Inference Time (No Pruning)",
-    # )
-    # plt.xlabel("Pruning (%)")
-    # plt.ylabel("Inference Time (s)")
-    #
-    # ax2 = ax1.twinx()
-    # p2 = ax2.plot(sparsities, accuracies, label="Validation Accuracy", color="green")
-    # p3 = ax2.plot(
-    #     sparsities,
-    #     [baseline_accuracy for _ in sparsities],
-    #     color="green",
-    #     linestyle="--",
-    #     label="Baseline Validation Accuracy (No Pruning)",
-    # )
-    # p4 = ax2.plot(
-    #     sparsities, train_accuracies, label="Training Accuracy", color="orange"
-    # )
-    # p5 = ax2.plot(
-    #     sparsities,
-    #     [baseline_train_accuracy for _ in sparsities],
-    #     color="orange",
-    #     linestyle="--",
-    #     label="Baseline Training Accuracy (No Pruning)",
-    # )
-    #
-    # plt.ylabel("Accuracy (%)")
-    # leg = p0 + p1 + p2 + p3 + p4 + p5
-    # labs = [l.get_label() for l in leg]
-    # ax1.legend(leg, labs, loc="lower left")
-    # if resnet:
-    #     plt.title("CIFAR-10 ResNet-101 Pruning Benchmark (Inference Time and Accuracy)")
-    #     plt.savefig("figures/resnet101_benchmark.png")
-    # else:
-    #     plt.title("MNIST CNN Pruning Benchmark (Inference Time and Accuracy)")
-    #     plt.savefig("figures/mnist_cnn_benchmark.png")
+
+    # Convert to numpy arrays for vectorization computation
+    accuracies = np.array(accuracies)
+    exec_times = np.array(exec_times)
+    exec_stds = np.array(exec_stds)
+
+    # Plot the results
+    plt.figure(figsize=(10, 10), dpi=400)
+    barWidth = 0.25
+    br1 = np.arange(len(model_names))
+    br2 = [x + barWidth for x in br1]
+    plt.bar(br1, exec_times, width=barWidth, label="Execution Time")
+    plt.bar(br2, accuracies, width=barWidth, label="Accuracy")
+    plt.xticks([r + barWidth for r in range(len(model_names))], model_names)
+
+    if resnet:
+        plt.title("CIFAR-10 ResNet-101 Quantization Benchmark (Inference Time and Accuracy)")
+        plt.savefig("figures/resnet101_benchmark.png")
+    else:
+        plt.title("MNIST CNN Pruning Benchmark (Inference Time and Accuracy)")
+        plt.savefig("figures/mnist_cnn_benchmark.png")
 
 
 if __name__ == "__main__":
@@ -694,7 +658,7 @@ if __name__ == "__main__":
         figures(device)
 
     elif sys.argv[1] == "benchmark":
-        benchmark(device, resnet=True)
+        benchmark(device, resnet=False)
 
     else:
         print("Invalid argument")
