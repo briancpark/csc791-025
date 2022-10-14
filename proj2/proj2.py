@@ -486,13 +486,19 @@ def figures(device):
         else:
             model_title = "MNIST CNN"
 
-        plt.title(
-            model_title
-            + " Quantization with "
-            + quantizer
-            + " Training and Validation Accuracy/Loss Over Epochs"
-        )
-        plt.savefig(save_fn)
+        if quantizer:
+            plt.title(
+                model_title
+                + " Quantization with "
+                + quantizer
+                + " Training and Validation Accuracy/Loss Over Epochs"
+            )
+            plt.savefig(save_fn)
+        else:
+            plt.title(
+                model_title + " Training and Validation Accuracy/Loss Over Epochs"
+            )
+            plt.savefig("figures/" + model_type + "_baseline.png")
         plt.clf()
 
 
