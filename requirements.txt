@@ -5,3 +5,9 @@ torchvision>=0.13.0
 tensorboard<=2.80
 torchviz>=0.0.2
 black
+numpy
+pandas
+matplotlib
+nvidia-tensorrt
+onnx
+pycuda
