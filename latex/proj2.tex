@@ -40,13 +40,15 @@ The \verb|print(model)| of the models before and after quantization of \hyperref
 
 The results for the four quantization methods are shown in Figure \ref{fig:mnist-charts} for the simple CNN trained on the MNIST dataset. \verb|BNNQuantizer| seemed to be the most difficult to train, as accuracy and loss wouldn't budge after many epochs. This is probably because there is not much complexity in the weights for MNIST to deal with and the model is not over-parameterized. Plus the weights are either $-1$ or $1$, making quantization and training for a small model difficult. It's also important to point out that Courbariaux only experimented binary quantization with multi layer perceptrons (MLP) on the MNIST dataset, which has no convolutional layers like our model \cite{binarynn}. We wonder if something is wrong with our weight initialization or training methodology, and we would explore this further if given more time. Figure \ref{fig:resnet-charts} shows the training data for ResNet-101.
 
+We compare these quantization training schemes with their baseline schemes in Figures \ref{fig:mnist-charts-nq} and \ref{fig:cifar-resnet-nq}.
+
 An interesting analysis of the binary neural network shows that there are 503213 $1$s and 696435 $-1$s for the weights of the simple CNN trained on MNIST dataset. For ResNet-101 trained on CIFAR-10 dataset, that's 22052154 $1$s and 22390662 $-1$s.
 
 
 \begin{figure}
     \centerline{\includegraphics[width=3.5in]{../proj2/figures/mnist_cnn_NaiveQuantizer.png}\includegraphics[width=3.5in]{../proj2/figures/mnist_cnn_DoReFaQuantizer.png}}
     \centerline{\includegraphics[width=3.5in]{../proj2/figures/mnist_cnn_QAT_Quantizer.png}\includegraphics[width=3.5in]{../proj2/figures/mnist_cnn_BNNQuantizer.png}}
-    \caption{MNIST CNN Training and Validation Accuracy/Loss}
+    \caption{MNIST CNN Training and Validation Accuracy/Loss with Quantization}
     \label{fig:mnist-charts}
 \end{figure}
 
@@ -54,8 +56,21 @@ An interesting analysis of the binary neural network shows that there are 503213
 \begin{figure}
     \centerline{\includegraphics[width=3.5in]{../proj2/figures/cifar10_resnet101_NaiveQuantizer.png}\includegraphics[width=3.5in]{../proj2/figures/cifar10_resnet101_DoReFaQuantizer.png}}
     \centerline{\includegraphics[width=3.5in]{../proj2/figures/cifar10_resnet101_QAT_Quantizer.png}\includegraphics[width=3.5in]{../proj2/figures/cifar10_resnet101_BNNQuantizer.png}}
-    \caption{CIFAR-10 ResNet-101 Training and Validation Accuracy/Loss}
+    \caption{CIFAR-10 ResNet-101 Training and Validation Accuracy/Loss with Quantization}
     \label{fig:resnet-charts}
+\end{figure}
+
+
+\begin{figure}
+    \centerline{\includegraphics[width=3.5in]{../proj2/figures/mnist_baseline.png}}
+    \caption{MNIST CNN Training and Validation Accuracy/Loss}
+    \label{fig:mnist-charts-nq}
+\end{figure}
+
+\begin{figure}
+    \centerline{\includegraphics[width=3.5in]{../proj2/figures/cifar10_baseline.png}}
+    \caption{CIFAR-10 ResNet-101 Training and Validation Accuracy/Loss}
+    \label{fig:cifar-resnet-nq}
 \end{figure}
 
 \section{Lessons Learned}
