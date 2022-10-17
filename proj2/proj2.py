@@ -662,24 +662,46 @@ if __name__ == "__main__":
         train_models(resnet=True)
         train_models(resnet=False)
 
+        quantize(device, "NaiveQuantizer", resnet=False)
+        quantize(device, "BNNQuantizer", resnet=False)
+        quantize(device, "QAT_Quantizer", resnet=False)
+        quantize(device, "DoReFaQuantizer", resnet=False)
+        quantize(device, "ObserverQuantizer", resnet=False)
+
+        quantize(device, "NaiveQuantizer", resnet=True)
+        quantize(device, "BNNQuantizer", resnet=True)
+        quantize(device, "QAT_Quantizer", resnet=True)
+        quantize(device, "DoReFaQuantizer", resnet=True)
+        quantize(device, "ObserverQuantizer", resnet=True)
+
+        train_models(resnet=True, quantizer="NaiveQuantizer")
+        train_models(resnet=False, quantizer="BNNQuantizer")
+        train_models(resnet=False, quantizer="QAT_Quantizer")
+        train_models(resnet=False, quantizer="DoReFaQuantizer")
+
+        benchmark(device, resnet=False)
+        benchmark(device, resnet=True)
+
+        figures(device)
+
     elif sys.argv[1] == "train":
         train_models(resnet=True, quantizer="NaiveQuantizer")
-        # train_models(resnet=False, quantizer="BNNQuantizer")
-        # train_models(resnet=False, quantizer="QAT_Quantizer")
-        # train_models(resnet=False, quantizer="DoReFaQuantizer")
+        train_models(resnet=False, quantizer="BNNQuantizer")
+        train_models(resnet=False, quantizer="QAT_Quantizer")
+        train_models(resnet=False, quantizer="DoReFaQuantizer")
 
     elif sys.argv[1] == "quantize":
         device = torch.device("cpu")
-        # quantize(device, "NaiveQuantizer", resnet=False)
-        # quantize(device, "BNNQuantizer", resnet=False)
-        # quantize(device, "QAT_Quantizer", resnet=False)
-        # quantize(device, "DoReFaQuantizer", resnet=False)
+        quantize(device, "NaiveQuantizer", resnet=False)
+        quantize(device, "BNNQuantizer", resnet=False)
+        quantize(device, "QAT_Quantizer", resnet=False)
+        quantize(device, "DoReFaQuantizer", resnet=False)
         quantize(device, "ObserverQuantizer", resnet=False)
 
-        # quantize(device, "NaiveQuantizer", resnet=True)
-        # quantize(device, "BNNQuantizer", resnet=True)
-        # quantize(device, "QAT_Quantizer", resnet=True)
-        # quantize(device, "DoReFaQuantizer", resnet=True)
+        quantize(device, "NaiveQuantizer", resnet=True)
+        quantize(device, "BNNQuantizer", resnet=True)
+        quantize(device, "QAT_Quantizer", resnet=True)
+        quantize(device, "DoReFaQuantizer", resnet=True)
         quantize(device, "ObserverQuantizer", resnet=True)
 
     elif sys.argv[1] == "figures":
