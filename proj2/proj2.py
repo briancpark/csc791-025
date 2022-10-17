@@ -640,10 +640,10 @@ def benchmark(device, resnet=False):
     ax2 = ax1.twinx()
     p1 = ax2.bar(br2, accuracies, width=barWidth, color="green", label="Accuracy")
     plt.ylabel("Validation Accuracy (%)")
-    
-    colors = {"Execution Time": "blue", "Accuracy":"green"}         
+
+    colors = {"Execution Time": "blue", "Accuracy": "green"}
     labels = list(colors.keys())
-    handles = [plt.Rectangle((0,0),1,1, color=colors[label]) for label in labels]
+    handles = [plt.Rectangle((0, 0), 1, 1, color=colors[label]) for label in labels]
     plt.legend(handles, labels)
     plt.xticks([r + 0.125 for r in range(len(model_names))], model_names)
 
