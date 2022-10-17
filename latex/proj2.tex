@@ -16,7 +16,7 @@
 \begin{document}
 
 \maketitle
-%Apply at least three of the quantization methods in the list of NNI Quantizer to one of the example models in this repository. Hint: this model can be trained quickly; but you don't have to use this one. In the application of a pruning method, try at least two different configurations to see the differences in the result model and model speed and accuracy.
+%Apply at least three of the quantization methods in the list of NNI Quantizer to one of the example models in this repository. Hint: this model can be trained quickly; but you don't have to use this one. In the application of a quantization method, try at least two different configurations to see the differences in the result model and model speed and accuracy.
 
 \section{Quantization Methods}
 %(1) What quantization methods you have applied to which DNN model.
@@ -29,21 +29,24 @@ We experimented with 5 quantization methods, since they are mostly rinse and rep
 We did all of our workload in the NVIDIA A100 on the ARC cluster \cite{arc}. Also, we could not do quantization properly on the M1 Mac due to the limitations of NNI not supporting the datatypes supported by the M1 Mac GPU. Thus, all of our experiments was done on the GPU.
 
 \subsection{Quantization Configuration}
-First we began with only quantizing the convolutional layers. Then we also added on quantizing the linear layers for a full effect of quantization and speedup. These are the only two layers that could be quantized by the NNI API as they are the core part of the network with weights. Fortunately, there is hardware support for qunatization on NVIDIA A100, such as the support for IEEE 16 bit floating point, 16 bit Brain Floating Point (\verb|bf16|), 8 bit integer, etc \cite{a100}. Unfortunately, there was trouble with getting NNI setup to fully see the speedups of quantization, as the quantization steps are simulated until they are compiled with TensorRT. There was trouble getting TensorRT to be properly installed on the ARC, thus the speedups will not be shown.
+First we began with only quantizing the convolutional layers on the simple CNN example provided by PyTorch. Then we also added on quantizing the linear layers for a full effect of quantization and speedup. These are the only two layers that could be quantized by the NNI API as they are the core part of the network with weights. Fortunately, there is hardware support for qunatization on NVIDIA A100, such as the support for IEEE 16 bit floating point, 16 bit Brain Floating Point (\verb|bf16|), 8 bit integer, etc \cite{a100}. Unfortunately, there was trouble with getting NNI setup to fully see the speedups of quantization, as the quantization steps are simulated until they are compiled with TensorRT. There was trouble getting TensorRT to be properly installed on the ARC, thus the speedups will not be properly shown. Because the simple CNN example provided by PyTorch was too easy and quick to train, the effects of quantization could not be seen. Instead, we trained on a much larger network, ResNet-101, as our second configuration to see the effects more clearly. For this, we set the quantization configuration to quantize both the convolutional and linear layers. We tried \verb|NaiveQuantizer|, \verb|QAT_Quantizer|, \verb|DoReFaQuantizer|, \verb|BNNQuantizer|, and \verb|ObserverQuantizer| on both the simple CNN example and ResNet-101 to see the effect of quantization across different scales more clearly.
 
 \section{Experimental Results}
 %(3) What results you have obtained, including the output of "print(model)" of your original model and quantized model, their running speeds and accuracies, and also your explanations of the reasons for the differences in the results from the different methods and configurations.
 
-The \verb|print(model)| of the models before and after quantization of \hyperref[sec:A1]{Simple CNN} and \hyperref[sec:A2]{ResNet-101} are available in Appendix A.
+The \verb|print(model)| of the models before and after quantizations of \hyperref[sec:A1]{Simple CNN} and \hyperref[sec:A2]{ResNet-101} are available in Appendix A. We noticed that all of the outputs are the same after quantization as we applied the same layers to be quantized, \verb|Conv2d| and \verb|Linear|.
 
-\verb|NaiveQuantizer|, \verb|QAT_Quantizer|, \verb|DoReFaQuantizer|, and \verb|BNNQuantizer| are quantization methods that require training from scratch. We showcase the loss and accuracies of the training and validation datasets for training and compared it to the baseline training process. We setup the code to train for 180 epochs and exit training early if we hit a training accuracy of 99\%, which is why MNIST will often exit early. For a
+\verb|NaiveQuantizer|, \verb|QAT_Quantizer|, \verb|DoReFaQuantizer|, and \verb|BNNQuantizer| are quantization methods that require training from scratch. We showcase the loss and accuracies of the training and validation datasets for training and compared it to the baseline training process. We setup the code to train for 180 epochs and exit training early if we hit a training accuracy of 99\%, which is why MNIST will often exit early. 
 
-The results for the four quantization methods are shown in Figure \ref{fig:mnist-charts} for the simple CNN trained on the MNIST dataset. \verb|BNNQuantizer| seemed to be the most difficult to train, as accuracy and loss wouldn't budge after many epochs. This is probably because there is not much complexity in the weights for MNIST to deal with and the model is not over-parameterized. Plus the weights are either $-1$ or $1$, making quantization and training for a small model difficult. It's also important to point out that Courbariaux only experimented binary quantization with multi layer perceptrons (MLP) on the MNIST dataset, which has no convolutional layers like our model \cite{binarynn}. We wonder if something is wrong with our weight initialization or training methodology, and we would explore this further if given more time. Figure \ref{fig:resnet-charts} shows the training data for ResNet-101.
+The results for the four quantization methods are shown in Figure \ref{fig:mnist-charts} for the simple CNN trained on the MNIST dataset. \verb|BNNQuantizer| seemed to be the most difficult to train, as accuracy and loss wouldn't budge after many epochs. This is probably because there is not much complexity in the weights for MNIST to deal with and the model is not over-parameterized. Plus the weights are either $-1$ or $1$, making quantization and training for a small model difficult. It's also important to point out that Courbariaux only experimented binary quantization with multi layer perceptrons (MLP) on the MNIST dataset, which has no convolutional layers like our model \cite{binarynn}. We wonder if something is wrong with our weight initialization or training methodology, and we would explore this further if given more time. Figure \ref{fig:mnist-charts-old} shows our initial attempt at quantization with just the \verb|Linear| layers being quantized. Notice how  \verb|BNNQuantizer| trains, indicating that quantizing convolutional layers for such a small model may have an effect on training.
 
-We compare these quantization training schemes with their baseline schemes in Figures \ref{fig:mnist-charts-nq} and \ref{fig:cifar-resnet-nq}.
+Figure \ref{fig:resnet-charts} shows the training data for ResNet-101. \verb|DoReFaQuantizer| and \verb|BNNQuantizer| are the best performing. Our training crashed for \verb|DoReFaQuantizer|, so we could only train up to 80 epochs, not 180 epochs. But given more time, we would've retrained again to see a fair comparison between \verb|DoReFaQuantizer| and \verb|BNNQuantizer|. For now, comparing at 80 epochs, it seems like \verb|DoReFaQuantizer| converges to a higher accuracy and lower loss compared to  \verb|BNNQuantizer|. We also notice that training and loss curves are much smoother in unquantized model, which is an interesting observation to see. \verb|NaiveQuantizer| works well, but then the loss becomes \verb|NaN| and weights are destoyed after epoch 50. \verb|QAT_Quantizer| doesn't budge, like we saw for \verb|BNNQuantizer| in the simple CNN for MNIST. Maybe there is a tradeoff between the quantization method and the complexity of the model, as \verb|BNNQuantizer| seems to train fairly well on ResNet-101. 
+
+We compare these quantization training schemes with their baseline schemes in Figures \ref{fig:mnist-charts-nq} and \ref{fig:cifar-resnet-nq}. Simple CNN for MNIST will perform about the same for the model that did quantize successfully. For ResNet-101 trained on CIFAR-10, the validation accuracy reached a peak of 87.05\%. We see that other quantization methods are barely able to reach over 80\% for validation accuracy for the same amount of epochs, indicating that more training epochs is required for quantization.
 
 An interesting analysis of the binary neural network shows that there are 503213 $1$s and 696435 $-1$s for the weights of the simple CNN trained on MNIST dataset. For ResNet-101 trained on CIFAR-10 dataset, that's 22052154 $1$s and 22390662 $-1$s.
 
+We also show the speedups and accuracy for the models, although there are no speedups to be seen with the limitation of the setup as mentioned before. The comparisons are shown in in Figure \ref{fig:quantization-compare}. \verb|ObserverQuantizer| is a quantizer for post-training, so accuracy won't degrade. But we couldn't see the effect of quantization speedups due to TensorRT not working.
 
 \begin{figure}
     \centerline{\includegraphics[width=3.5in]{../proj2/figures/mnist_cnn_NaiveQuantizer.png}\includegraphics[width=3.5in]{../proj2/figures/mnist_cnn_DoReFaQuantizer.png}}
@@ -52,6 +55,12 @@ An interesting analysis of the binary neural network shows that there are 503213
     \label{fig:mnist-charts}
 \end{figure}
 
+\begin{figure}
+    \centerline{\includegraphics[width=3.5in]{../proj2/figures/mnist_cnn_NaiveQuantizer_linear.png}\includegraphics[width=3.5in]{../proj2/figures/mnist_cnn_DoReFaQuantizer_linear.png}}
+    \centerline{\includegraphics[width=3.5in]{../proj2/figures/mnist_cnn_QAT_Quantizer_linear.png}\includegraphics[width=3.5in]{../proj2/figures/mnist_cnn_BNNQuantizer_linear.png}}
+    \caption{MNIST CNN Training and Validation Accuracy/Loss with Quantization Linear Layers Only}
+    \label{fig:mnist-charts-old}
+\end{figure}
 
 \begin{figure}
     \centerline{\includegraphics[width=3.5in]{../proj2/figures/cifar10_resnet101_NaiveQuantizer.png}\includegraphics[width=3.5in]{../proj2/figures/cifar10_resnet101_DoReFaQuantizer.png}}
@@ -73,16 +82,22 @@ An interesting analysis of the binary neural network shows that there are 503213
     \label{fig:cifar-resnet-nq}
 \end{figure}
 
+\begin{figure}
+    \centerline{\includegraphics[width=3.5in]{../proj2/figures/mnist_cnn_benchmark.png}\includegraphics[width=3.5in]{../proj2/figures/cifar10_resnet101_benchmark.png}}
+    \caption{Accuracy and Speedup Comparison for Different Quantization Schemes}
+    \label{fig:quantization-compare}
+\end{figure}
+
 \section{Lessons Learned}
 %(4) What lessons you have learned through the project.
-We learned that there are varying levels of quantizations that can come into play. The most convenient one is quantization for post-training. This is \verb|ObserverQuantizer|. This simply changes the weights into lower precision. There are tradeoffs
+We learned that there are varying levels of quantizations that can come into play. The most convenient one is quantization for post-training. This is \verb|ObserverQuantizer|. This simply changes the weights into lower precision.
 
 
 Some difficulties that arise when working with NNI is that it's not clear if the weights are quantized or not. It was not clear that we had to \textit{train from scratch} for most of the quantization methods. We found it really inefficient to train if we already had the weights, especially for very deep neural networks like ResNet-101. Only \verb|ObserverQuantizer| will need some slight fine tuning after post training to stabilize the weights. 
 
-Another difficulty was that training with quantized networks caused loss functions to become unstable. We noticed that gradients often exploded and made the loss function output \verb|NaN| or got stuck at a certain local minima.
+Another difficulty was that training with quantized networks caused loss functions to become unstable. We noticed that gradients often exploded and made the loss function output \verb|NaN| or get stuck at a local minima.
 
-We did not experiment with any quantizations for the M1 Mac, as the functionality is limited. Quantization seems to be much more optimized and supported for NVIDIA CUDA devices. 
+We did not experiment with any quantizations for the M1 Mac or CPU, as the functionality is limited. Quantization seems to be much more optimized and supported for NVIDIA CUDA devices due to it's support with ONNX model format and TensorRT. 
 
 \section{GitHub Repository}
 %(5) A link to your github repository that contains all the scripts used in this project and a README describing the structure of the repository and how the folders in the repository correspond to the items in the report. The report must be in PDF, with the five required parts clearly marked. 
@@ -108,7 +123,132 @@ Net(
 )
 \end{verbatim}
 
-Quantized with DoReFaQuantizer
+This is Simple CNN with only the linear layers quantized for DoReFaQuantizer
+\begin{verbatim}
+Net(
+  (conv1): Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1))
+  (conv2): Conv2d(32, 64, kernel_size=(3, 3), stride=(1, 1))
+  (dropout1): Dropout(p=0.25, inplace=False)
+  (dropout2): Dropout(p=0.5, inplace=False)
+  (fc1): QuantizerModuleWrapper(
+    (module): Linear(in_features=9216, out_features=128, bias=True)
+  )
+  (fc2): QuantizerModuleWrapper(
+    (module): Linear(in_features=128, out_features=10, bias=True)
+  )
+)
+\end{verbatim}
+
+This is Simple CNN with only the linear layers quantized for NaiveQuantizer
+\begin{verbatim}
+Net(
+  (conv1): Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1))
+  (conv2): Conv2d(32, 64, kernel_size=(3, 3), stride=(1, 1))
+  (dropout1): Dropout(p=0.25, inplace=False)
+  (dropout2): Dropout(p=0.5, inplace=False)
+  (fc1): QuantizerModuleWrapper(
+    (module): Linear(in_features=9216, out_features=128, bias=True)
+  )
+  (fc2): QuantizerModuleWrapper(
+    (module): Linear(in_features=128, out_features=10, bias=True)
+  )
+)
+\end{verbatim}
+
+This is Simple CNN with only the linear layers quantized for QATQuantizer
+\begin{verbatim}
+Net(
+  (conv1): Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1))
+  (conv2): Conv2d(32, 64, kernel_size=(3, 3), stride=(1, 1))
+  (dropout1): Dropout(p=0.25, inplace=False)
+  (dropout2): Dropout(p=0.5, inplace=False)
+  (fc1): QuantizerModuleWrapper(
+    (module): Linear(in_features=9216, out_features=128, bias=True)
+  )
+  (fc2): QuantizerModuleWrapper(
+    (module): Linear(in_features=128, out_features=10, bias=True)
+  )
+)
+\end{verbatim}
+
+
+This is Simple CNN with only the linear layers quantized for BNNQuantizer
+\begin{verbatim}
+Net(
+  (conv1): Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1))
+  (conv2): Conv2d(32, 64, kernel_size=(3, 3), stride=(1, 1))
+  (dropout1): Dropout(p=0.25, inplace=False)
+  (dropout2): Dropout(p=0.5, inplace=False)
+  (fc1): QuantizerModuleWrapper(
+    (module): Linear(in_features=9216, out_features=128, bias=True)
+  )
+  (fc2): QuantizerModuleWrapper(
+    (module): Linear(in_features=128, out_features=10, bias=True)
+  )
+)
+\end{verbatim}
+
+This is Simple CNN with convolutional and linear layers quantized for DoReFaQuantizer
+\begin{verbatim}
+Net(
+  (conv1): QuantizerModuleWrapper(
+    (module): Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1))
+  )
+  (conv2): QuantizerModuleWrapper(
+    (module): Conv2d(32, 64, kernel_size=(3, 3), stride=(1, 1))
+  )
+  (dropout1): Dropout(p=0.25, inplace=False)
+  (dropout2): Dropout(p=0.5, inplace=False)
+  (fc1): QuantizerModuleWrapper(
+    (module): Linear(in_features=9216, out_features=128, bias=True)
+  )
+  (fc2): QuantizerModuleWrapper(
+    (module): Linear(in_features=128, out_features=10, bias=True)
+  )
+)
+\end{verbatim}
+
+This is Simple CNN with convolutional and linear layers quantized for NaiveQuantizer
+\begin{verbatim}
+Net(
+  (conv1): QuantizerModuleWrapper(
+    (module): Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1))
+  )
+  (conv2): QuantizerModuleWrapper(
+    (module): Conv2d(32, 64, kernel_size=(3, 3), stride=(1, 1))
+  )
+  (dropout1): Dropout(p=0.25, inplace=False)
+  (dropout2): Dropout(p=0.5, inplace=False)
+  (fc1): QuantizerModuleWrapper(
+    (module): Linear(in_features=9216, out_features=128, bias=True)
+  )
+  (fc2): QuantizerModuleWrapper(
+    (module): Linear(in_features=128, out_features=10, bias=True)
+  )
+)
+\end{verbatim}
+
+This is Simple CNN with convolutional and linear layers quantized for QATQuantizer
+\begin{verbatim}
+Net(
+  (conv1): QuantizerModuleWrapper(
+    (module): Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1))
+  )
+  (conv2): QuantizerModuleWrapper(
+    (module): Conv2d(32, 64, kernel_size=(3, 3), stride=(1, 1))
+  )
+  (dropout1): Dropout(p=0.25, inplace=False)
+  (dropout2): Dropout(p=0.5, inplace=False)
+  (fc1): QuantizerModuleWrapper(
+    (module): Linear(in_features=9216, out_features=128, bias=True)
+  )
+  (fc2): QuantizerModuleWrapper(
+    (module): Linear(in_features=128, out_features=10, bias=True)
+  )
+)
+\end{verbatim}
+
+This is Simple CNN with convolutional and linear layers quantized for BNNQuantizer
 \begin{verbatim}
 Net(
   (conv1): QuantizerModuleWrapper(
@@ -463,7 +603,8 @@ ResNet(
 )
 \end{verbatim}
 
-Quantized with DoReFaQuantizer
+Quantized with NaiveQuantizer, QATQuantizer, DoReFaQuantizer, and BNNQuantizer. Note that outputs are all the same as we quantize \verb|Conv2d| and \verb|Linear| layers for all of the methods for ResNet-101.
+
 \begin{verbatim}
 ResNet(
   (conv1): QuantizerModuleWrapper(
@@ -995,6 +1136,342 @@ ResNet(
       (conv3): QuantizerModuleWrapper(
         (module): Conv2d(512, 2048, kernel_size=(1, 1), stride=(1, 1), bias=False)
       )
+      (bn3): BatchNorm2d(2048, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+  )
+  (avgpool): AdaptiveAvgPool2d(output_size=(1, 1))
+  (fc): QuantizerModuleWrapper(
+    (module): Linear(in_features=2048, out_features=1000, bias=True)
+  )
+)
+\end{verbatim}
+
+
+We also tried a different configuration for only Linear layers to be quantized. 
+\begin{verbatim}
+ResNet(
+  (conv1): Conv2d(3, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+  (bn1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+  (relu): ReLU(inplace=True)
+  (maxpool): MaxPool2d(kernel_size=3, stride=2, padding=1, dilation=1, ceil_mode=False)
+  (layer1): Sequential(
+    (0): Bottleneck(
+      (conv1): Conv2d(64, 64, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(64, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+      (downsample): Sequential(
+        (0): Conv2d(64, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+        (1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      )
+    )
+    (1): Bottleneck(
+      (conv1): Conv2d(256, 64, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(64, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (2): Bottleneck(
+      (conv1): Conv2d(256, 64, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(64, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+  )
+  (layer2): Sequential(
+    (0): Bottleneck(
+      (conv1): Conv2d(256, 128, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(128, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(128, 512, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+      (downsample): Sequential(
+        (0): Conv2d(256, 512, kernel_size=(1, 1), stride=(2, 2), bias=False)
+        (1): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      )
+    )
+    (1): Bottleneck(
+      (conv1): Conv2d(512, 128, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(128, 512, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (2): Bottleneck(
+      (conv1): Conv2d(512, 128, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(128, 512, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (3): Bottleneck(
+      (conv1): Conv2d(512, 128, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(128, 512, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+  )
+  (layer3): Sequential(
+    (0): Bottleneck(
+      (conv1): Conv2d(512, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+      (downsample): Sequential(
+        (0): Conv2d(512, 1024, kernel_size=(1, 1), stride=(2, 2), bias=False)
+        (1): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      )
+    )
+    (1): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (2): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (3): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (4): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (5): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (6): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (7): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (8): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (9): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (10): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (11): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (12): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (13): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (14): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (15): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (16): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (17): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (18): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (19): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (20): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (21): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (22): Bottleneck(
+      (conv1): Conv2d(1024, 256, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(256, 1024, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+  )
+  (layer4): Sequential(
+    (0): Bottleneck(
+      (conv1): Conv2d(1024, 512, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(512, 512, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(512, 2048, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(2048, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+      (downsample): Sequential(
+        (0): Conv2d(1024, 2048, kernel_size=(1, 1), stride=(2, 2), bias=False)
+        (1): BatchNorm2d(2048, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      )
+    )
+    (1): Bottleneck(
+      (conv1): Conv2d(2048, 512, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(512, 2048, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn3): BatchNorm2d(2048, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (relu): ReLU(inplace=True)
+    )
+    (2): Bottleneck(
+      (conv1): Conv2d(2048, 512, kernel_size=(1, 1), stride=(1, 1), bias=False)
+      (bn1): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv2): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+      (bn2): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+      (conv3): Conv2d(512, 2048, kernel_size=(1, 1), stride=(1, 1), bias=False)
       (bn3): BatchNorm2d(2048, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
       (relu): ReLU(inplace=True)
     )
