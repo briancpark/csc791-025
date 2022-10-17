@@ -419,8 +419,8 @@ def figures(device):
         UserWarning("Cannot generate graphs on MPS mode, fallback to CPU")
         device = torch.device("cpu")
 
-    cnn_model = Net().to(device)
-    resnet18_model = models.resnet18().to(device)
+    cnn_model = Net()
+    resnet18_model = models.resnet18()
 
     cnn_yhat = cnn_model(torch.rand(1, 1, 28, 28))
     resnet18_yhat = resnet18_model(torch.rand(1, 3, 224, 224))
@@ -536,7 +536,7 @@ def benchmark(device, resnet=False):
         tok = time.time()
         total_time = tok - tik
         times.append(total_time)
-        _, _, _, baseline_train_accuracy = test(model, device, train_loader, criterion)
+        _, _, _, baseline_train_accuracy = test(model, device, test_loader, criterion)
         print(
             "Average test loss: {:.4f}, Train Accuracy ({:.0f}%), Val Accuracy: {}/{} ({:.0f}%)".format(
                 test_loss,
@@ -560,17 +560,24 @@ def benchmark(device, resnet=False):
 
     # Based on our training session, we pick the ones that actually trained properly
     if resnet:
-        model_names = ["DoReFaQuantizer", "BNNQuantizer"]
+        model_names = ["DoReFaQuantizer", "BNNQuantizer", "ObserverQuantizer"]
         model_fns = [
             "models/DoReFaQuantizer/cifar10_resnet101_quantized.pt",
             "models/BNNQuantizer/cifar10_resnet101_quantized.pt",
+            "models/ObserverQuantizer/cifar10_resnet101_quantized.pt",
         ]
     else:
-        model_names = ["DoReFaQuantizer", "NaiveQuantizer", "QAT_Quantizer"]
+        model_names = [
+            "DoReFaQuantizer",
+            "NaiveQuantizer",
+            "QAT_Quantizer",
+            "ObserverQuantizer",
+        ]
         model_fns = [
             "models/DoReFaQuantizer/mnist_cnn_quantized.pt",
             "models/NaiveQuantizer/mnist_cnn_quantized.pt",
             "models/QAT_Quantizer/mnist_cnn_quantized.pt",
+            "models/ObserverQuantizer/mnist_cnn_quantized.pt",
         ]
 
     for model_fn in tqdm(model_fns):
@@ -590,7 +597,7 @@ def benchmark(device, resnet=False):
             tok = time.time()
             total_time = tok - tik
             times.append(total_time)
-            _, _, _, train_accuracy = test(model, device, train_loader, criterion)
+            _, _, _, train_accuracy = test(model, device, test_loader, criterion)
             tqdm.write(
                 "Average test loss: {:.4f}, Train Accuracy ({:.0f}%), Val Accuracy: {}/{} ({:.0f}%)".format(
                     test_loss, train_accuracy, correct, test_dataset_length, accuracy
@@ -613,6 +620,10 @@ def benchmark(device, resnet=False):
 
         tqdm.write("Average time: {0}".format(sum(times) / len(times)))
 
+    model_names.insert(0, "Baseline")
+    exec_times.insert(0, baseline_time)
+    accuracies.insert(0, baseline_accuracy)
+
     # Convert to numpy arrays for vectorization computation
     accuracies = np.array(accuracies)
     exec_times = np.array(exec_times)
@@ -620,18 +631,27 @@ def benchmark(device, resnet=False):
 
     # Plot the results
     plt.figure(figsize=(10, 10), dpi=400)
+    ax1 = plt.subplot()
     barWidth = 0.25
     br1 = np.arange(len(model_names))
     br2 = [x + barWidth for x in br1]
-    plt.bar(br1, exec_times, width=barWidth, label="Execution Time")
-    plt.bar(br2, accuracies, width=barWidth, label="Accuracy")
-    plt.xticks([r + barWidth for r in range(len(model_names))], model_names)
+    p0 = ax1.bar(br1, exec_times, width=barWidth, color="blue", label="Execution Time")
+    plt.ylabel("Execution Time (s)")
+    ax2 = ax1.twinx()
+    p1 = ax2.bar(br2, accuracies, width=barWidth, color="green", label="Accuracy")
+    plt.ylabel("Validation Accuracy (%)")
+    
+    colors = {"Execution Time": "blue", "Accuracy":"green"}         
+    labels = list(colors.keys())
+    handles = [plt.Rectangle((0,0),1,1, color=colors[label]) for label in labels]
+    plt.legend(handles, labels)
+    plt.xticks([r + 0.125 for r in range(len(model_names))], model_names)
 
     if resnet:
         plt.title(
             "CIFAR-10 ResNet-101 Quantization Benchmark (Inference Time and Accuracy)"
         )
-        plt.savefig("figures/resnet101_benchmark.png")
+        plt.savefig("figures/cifar10_resnet101_benchmark.png")
     else:
         plt.title("MNIST CNN Pruning Benchmark (Inference Time and Accuracy)")
         plt.savefig("figures/mnist_cnn_benchmark.png")
@@ -650,16 +670,16 @@ if __name__ == "__main__":
 
     elif sys.argv[1] == "quantize":
         device = torch.device("cpu")
-        quantize(device, "NaiveQuantizer", resnet=False)
-        quantize(device, "BNNQuantizer", resnet=False)
-        quantize(device, "QAT_Quantizer", resnet=False)
-        quantize(device, "DoReFaQuantizer", resnet=False)
+        # quantize(device, "NaiveQuantizer", resnet=False)
+        # quantize(device, "BNNQuantizer", resnet=False)
+        # quantize(device, "QAT_Quantizer", resnet=False)
+        # quantize(device, "DoReFaQuantizer", resnet=False)
         quantize(device, "ObserverQuantizer", resnet=False)
 
-        quantize(device, "NaiveQuantizer", resnet=True)
-        quantize(device, "BNNQuantizer", resnet=True)
-        quantize(device, "QAT_Quantizer", resnet=True)
-        quantize(device, "DoReFaQuantizer", resnet=True)
+        # quantize(device, "NaiveQuantizer", resnet=True)
+        # quantize(device, "BNNQuantizer", resnet=True)
+        # quantize(device, "QAT_Quantizer", resnet=True)
+        # quantize(device, "DoReFaQuantizer", resnet=True)
         quantize(device, "ObserverQuantizer", resnet=True)
 
     elif sys.argv[1] == "figures":
@@ -667,6 +687,7 @@ if __name__ == "__main__":
 
     elif sys.argv[1] == "benchmark":
         benchmark(device, resnet=False)
+        benchmark(device, resnet=True)
 
     else:
         print("Invalid argument")
