@@ -4,6 +4,7 @@ import os
 import csv
 import time
 
+import nni
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -149,118 +150,138 @@ def load_data(train_kwargs, test_kwargs, mnist=True):
     return train_loader, test_loader
 
 
-def train_models(resnet=False, quantizer="", retrain=False):
-    train_kwargs = {"batch_size": batch_size}
-    test_kwargs = {"batch_size": test_batch_size}
+# def train_models(resnet=False, quantizer="", retrain=False):
+#     train_kwargs = {"batch_size": batch_size}
+#     test_kwargs = {"batch_size": test_batch_size}
 
-    # If we're using NVIDIA, we can apply some more software/hardware optimizations if available
-    if device.type == "cuda":
-        cuda_kwargs = {"num_workers": num_cpus, "pin_memory": True, "shuffle": True}
-        train_kwargs.update(cuda_kwargs)
-        test_kwargs.update(cuda_kwargs)
+#     # If we're using NVIDIA, we can apply some more software/hardware optimizations if available
+#     if device.type == "cuda":
+#         cuda_kwargs = {"num_workers": num_cpus, "pin_memory": True, "shuffle": True}
+#         train_kwargs.update(cuda_kwargs)
+#         test_kwargs.update(cuda_kwargs)
 
-    train_loader, test_loader = load_data(train_kwargs, test_kwargs, mnist=not resnet)
+#     train_loader, test_loader = load_data(train_kwargs, test_kwargs, mnist=not resnet)
 
-    if resnet:
-        if quantizer:
-            model_save_path = "models/" + quantizer + "/cifar10_resnet101_quantized.pt"
-            model = torch.load(model_save_path, map_location=device)
-        else:
-            model_save_path = "models/cifar10_resnet101.pt"
-            model = models.resnet101().to(device)
-        logger_fn = "logs/cifar10_resnet101_" + quantizer + ".csv"
-    else:
-        if quantizer:
-            model_save_path = "models/" + quantizer + "/mnist_cnn_quantized.pt"
-            model = torch.load(model_save_path, map_location=device)
-        else:
-            model_save_path = "models/mnist_cnn.pt"
-            model = Net().to(device)
-        logger_fn = "logs/mnist_cnn_" + quantizer + ".csv"
+#     if resnet:
+#         if quantizer:
+#             model_save_path = "models/" + quantizer + "/cifar10_resnet101_quantized.pt"
+#             model = torch.load(model_save_path, map_location=device)
+#         else:
+#             model_save_path = "models/cifar10_resnet101.pt"
+#             model = models.resnet101().to(device)
+#         logger_fn = "logs/cifar10_resnet101_" + quantizer + ".csv"
+#     else:
+#         if quantizer:
+#             model_save_path = "models/" + quantizer + "/mnist_cnn_quantized.pt"
+#             model = torch.load(model_save_path, map_location=device)
+#         else:
+#             model_save_path = "models/mnist_cnn.pt"
+#             model = Net().to(device)
+#         logger_fn = "logs/mnist_cnn_" + quantizer + ".csv"
 
-    # If we were in the middle of training, reload the model.
-    if os.path.exists(model_save_path) or retrain:
-        model = torch.load(model_save_path, map_location=device)
+#     # If we were in the middle of training, reload the model.
+#     if os.path.exists(model_save_path) or retrain:
+#         model = torch.load(model_save_path, map_location=device)
 
-    if resnet:
-        # CIFAR-10 ResNet-101
-        # Reccomended hyperparameters are here: https://discuss.pytorch.org/t/resnet-with-cifar10-only-reaches-86-accuracy-expecting-90/135051
-        optimizer = SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4)
-        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[90, 135])
-        criterion = nn.CrossEntropyLoss()
-    else:
-        # MNIST CNN
-        optimizer = optim.Adadelta(model.parameters(), lr=lr)
-        scheduler = StepLR(optimizer, step_size=1, gamma=gamma)
-        criterion = F.nll_loss
+#     if resnet:
+#         # CIFAR-10 ResNet-101
+#         # Reccomended hyperparameters are here: https://discuss.pytorch.org/t/resnet-with-cifar10-only-reaches-86-accuracy-expecting-90/135051
+#         optimizer = SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4)
+#         scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[90, 135])
+#         criterion = nn.CrossEntropyLoss()
+#     else:
+#         # MNIST CNN
+#         optimizer = optim.Adadelta(model.parameters(), lr=lr)
+#         scheduler = StepLR(optimizer, step_size=1, gamma=gamma)
+#         criterion = F.nll_loss
 
-    # For logging purposes
-    if not os.path.exists(logger_fn):
-        with open(logger_fn, "w", newline="") as fh:
-            writer = csv.writer(fh)
-            writer.writerow(
-                [
-                    "train_loss",
-                    "train_correct",
-                    "train_dataset_length",
-                    "train_accuracy",
-                    "test_loss",
-                    "test_correct",
-                    "test_dataset_length",
-                    "test_accuracy",
-                ]
-            )
+#     # For logging purposes
+#     if not os.path.exists(logger_fn):
+#         with open(logger_fn, "w", newline="") as fh:
+#             writer = csv.writer(fh)
+#             writer.writerow(
+#                 [
+#                     "train_loss",
+#                     "train_correct",
+#                     "train_dataset_length",
+#                     "train_accuracy",
+#                     "test_loss",
+#                     "test_correct",
+#                     "test_dataset_length",
+#                     "test_accuracy",
+#                 ]
+#             )
 
-    for epoch in tqdm(
-        range(1, epochs + 1),
-        position=0,
-        desc="Epochs      ",
-        leave=False,
-        colour="green",
-    ):
-        train(model, device, train_loader, optimizer, criterion, epoch)
-        train_loss, train_correct, train_dataset_length, train_accuracy = test(
-            model, device, train_loader, criterion
-        )
-        test_loss, test_correct, test_dataset_length, test_accuracy = test(
-            model, device, test_loader, criterion
-        )
+#     for epoch in tqdm(
+#         range(1, epochs + 1),
+#         position=0,
+#         desc="Epochs      ",
+#         leave=False,
+#         colour="green",
+#     ):
+#         train(model, device, train_loader, optimizer, criterion, epoch)
+#         train_loss, train_correct, train_dataset_length, train_accuracy = test(
+#             model, device, train_loader, criterion
+#         )
+#         test_loss, test_correct, test_dataset_length, test_accuracy = test(
+#             model, device, test_loader, criterion
+#         )
 
-        # For logging purposes
-        with open(logger_fn, "a") as fh:
-            writer = csv.writer(fh)
-            writer.writerow(
-                [
-                    train_loss,
-                    train_correct,
-                    train_dataset_length,
-                    train_accuracy,
-                    test_loss,
-                    test_correct,
-                    test_dataset_length,
-                    test_accuracy,
-                ]
-            )
-        tqdm.write("Accuracy: %.4f" % test_accuracy)
-        scheduler.step()
+#         # For logging purposes
+#         with open(logger_fn, "a") as fh:
+#             writer = csv.writer(fh)
+#             writer.writerow(
+#                 [
+#                     train_loss,
+#                     train_correct,
+#                     train_dataset_length,
+#                     train_accuracy,
+#                     test_loss,
+#                     test_correct,
+#                     test_dataset_length,
+#                     test_accuracy,
+#                 ]
+#             )
+#         tqdm.write("Accuracy: %.4f" % test_accuracy)
+#         scheduler.step()
 
-        ### Update the weights and save the model
-        torch.save(model, model_save_path)
-        if test_accuracy > 99.0:
-            break
+#         ### Update the weights and save the model
+#         torch.save(model, model_save_path)
+#         if test_accuracy > 99.0:
+#             break
 
-    test_loss, correct, test_dataset_length, accuracy = test(
-        model, device, test_loader, criterion
-    )
-    print(
-        "Average test loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)".format(
-            test_loss, correct, test_dataset_length, accuracy
-        )
-    )
+#     test_loss, correct, test_dataset_length, accuracy = test(
+#         model, device, test_loader, criterion
+#     )
+#     print(
+#         "Average test loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)".format(
+#             test_loss, correct, test_dataset_length, accuracy
+#         )
+#     )
 
 
 def hpo(device):
-    model = models.resnet101().to(device)
+    from nni.experiment import Experiment
+
+    experiment = Experiment("local")
+
+    experiment.config.trial_command = "python model.py"
+    experiment.config.trial_code_directory = "."
+
+    search_space = {
+        "features": {"_type": "choice", "_value": [128, 256, 512, 1024]},
+        "lr": {"_type": "loguniform", "_value": [0.0001, 0.1]},
+        "momentum": {"_type": "uniform", "_value": [0, 1]},
+    }
+
+    experiment.config.search_space = search_space
+    experiment.config.tuner.name = "TPE"
+    experiment.config.tuner.class_args["optimize_mode"] = "maximize"
+
+    experiment.config.max_trial_number = 10
+    experiment.config.trial_concurrency = 2
+
+    experiment.run(8080)
 
     print("Starting HPO")
     return
@@ -611,8 +632,7 @@ def benchmark(device, resnet=False):
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
-        train_models(resnet=True)
-        train_models(resnet=False)
+        nni.experiment.Experiment.view("ye68zgmp")
 
     elif sys.argv[1] == "train":
         train_models(resnet=True, quantizer="NaiveQuantizer")
