@@ -74,9 +74,12 @@ def hpo(device, tuner):
         }
 
     experiment.config.max_trial_number = 10
-    experiment.config.trial_concurrency = 100
+    experiment.config.trial_concurrency = 2
 
     experiment.run(8080)
+    command = input("Experiement finished. Enter 'r' to restart, 'q' to quit.\n> ")
+    experiment.stop()
+    return command == 'r'
 
 
 if __name__ == "__main__":
@@ -84,7 +87,7 @@ if __name__ == "__main__":
         nni.experiment.Experiment.view("ye68zgmp")
 
     elif sys.argv[1] == "hpo":
-        hpo(device, sys.argv[2])
+        while(hpo(device, sys.argv[2])): pass
 
     else:
         print("Invalid argument")
