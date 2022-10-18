@@ -24,6 +24,7 @@ params = {
     "features": 512,
     "lr": 0.001,
     "momentum": 0,
+    "batch_size": 64,
 }
 
 optimized_params = nni.get_next_parameter()
@@ -45,11 +46,10 @@ training_data = datasets.CIFAR10(
 )
 test_data = datasets.CIFAR10(root=dir, train=False, download=True, transform=ToTensor())
 
-batch_size = 64
+batch_size = params["batch_size"]
 
 train_dataloader = DataLoader(training_data, batch_size=batch_size)
 test_dataloader = DataLoader(test_data, batch_size=batch_size)
-
 
 model = models.vgg19().to(device)
 
@@ -87,7 +87,7 @@ def test(dataloader, model, loss_fn):
     return correct
 
 
-epochs = 5
+epochs = 10
 for t in range(epochs):
     print(f"Epoch {t+1}\n-------------------------------")
     train(train_dataloader, model, loss_fn, optimizer)
