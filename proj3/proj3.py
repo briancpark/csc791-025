@@ -1,32 +1,10 @@
 import torch
 import sys
 import os
-import csv
-import time
-
 import nni
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-from torch.optim import SGD
-from torchvision import datasets, transforms
-from torch.optim.lr_scheduler import StepLR
-from torchviz import make_dot
-from tqdm import tqdm
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import torchvision.models as models
-from pathlib import Path
 from nni.experiment import Experiment
 
-from nni.algorithms.compression.pytorch.quantization import (
-    NaiveQuantizer,
-    QAT_Quantizer,
-    DoReFaQuantizer,
-    BNNQuantizer,
-    ObserverQuantizer,
-)
 
 device = torch.device(
     "mps"
@@ -88,6 +66,12 @@ def hpo(device, tuner):
     experiment.config.search_space = search_space
     experiment.config.tuner.name = tuner
     experiment.config.tuner.class_args["optimize_mode"] = "maximize"
+    if tuner == "Hyperband":
+        experiment.config.tuner.class_args = {
+            "optimize_mode": "maximize",
+            "R": 60,
+            "eta": 3,
+        }
 
     experiment.config.max_trial_number = 10
     experiment.config.trial_concurrency = 100

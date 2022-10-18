@@ -27,6 +27,17 @@ params = {
     "batch_size": 64,
 }
 
+if torch.cuda.is_available():
+    # The flag below controls whether to allow TF32 on matmul. This flag defaults to False
+    # in PyTorch 1.12 and later.
+    torch.backends.cuda.matmul.allow_tf32 = True
+
+    # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
+    torch.backends.cudnn.allow_tf32 = True
+
+    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
+
+
 optimized_params = nni.get_next_parameter()
 params.update(optimized_params)
 print(params)
