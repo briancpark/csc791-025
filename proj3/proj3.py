@@ -47,7 +47,7 @@ def hpo(device, tuner, batch="", use_vgg=False):
     if use_vgg:
         experiment.config.trial_command = "python model.py vgg"
     else:
-        experiment.config.trial_command = "python model.py"
+        experiment.config.trial_command = "python model.py n"
 
     search_space = {
         "features": {"_type": "choice", "_value": [128, 256, 512, 1024]},
