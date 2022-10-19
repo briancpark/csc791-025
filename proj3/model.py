@@ -8,7 +8,7 @@ import torchvision.models as models
 import os
 import sys
 
-if sys.args[1] == "vgg":
+if sys.argv[1] == "vgg":
     use_vgg = True
 else:
     use_vgg = False
