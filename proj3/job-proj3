@@ -1,0 +1,12 @@
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 1
+#SBATCH -p GPU-shared
+#SBATCH -t 10:00:00
+#SBATCH --gres=gpu:1
+
+source ~/.bashrc
+conda activate csc791
+
+cd /jet/home/bpark1/$USER/csc791-025/proj3
+nnictl create --config config.yaml --port 8080
