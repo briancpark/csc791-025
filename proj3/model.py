@@ -52,30 +52,36 @@ elif arc_env:
 else:
     dir = "data"
 
-training_data = datasets.FashionMNIST(root="data", train=True, download=True, transform=ToTensor())
-test_data = datasets.FashionMNIST(root="data", train=False, download=True, transform=ToTensor())
+training_data = datasets.FashionMNIST(
+    root="data", train=True, download=True, transform=ToTensor()
+)
+test_data = datasets.FashionMNIST(
+    root="data", train=False, download=True, transform=ToTensor()
+)
 
 batch_size = params["batch_size"]
 
 train_dataloader = DataLoader(training_data, batch_size=batch_size)
 test_dataloader = DataLoader(test_data, batch_size=batch_size)
 
+
 class MLP(nn.Module):
     def __init__(self):
         super(MLP, self).__init__()
         self.flatten = nn.Flatten()
         self.linear_relu_stack = nn.Sequential(
-            nn.Linear(28*28, params['features']),
+            nn.Linear(28 * 28, params["features"]),
             nn.ReLU(),
-            nn.Linear(params['features'], params['features']),
+            nn.Linear(params["features"], params["features"]),
             nn.ReLU(),
-            nn.Linear(params['features'], 10)
+            nn.Linear(params["features"], 10),
         )
 
     def forward(self, x):
         x = self.flatten(x)
         logits = self.linear_relu_stack(x)
         return logits
+
 
 model = MLP().to(device)
 

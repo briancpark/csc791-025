@@ -19,18 +19,6 @@ print("Using device:", device.type.upper())
 # Set Random Seed
 torch.manual_seed(42)
 
-# Set other global parameters
-batch_size = 64
-test_batch_size = 1000
-epochs = 180
-lr = 1.0
-gamma = 0.7
-seed = 1
-save_model = False
-criterion = nn.CrossEntropyLoss()
-TRIALS = 5
-num_cpus = int(os.cpu_count() / 2)
-
 # Setup directory and environment variables
 arc_env = os.path.exists("/mnt/beegfs/" + os.environ["USER"])
 os.system("mkdir -p figures")
@@ -48,7 +36,7 @@ if torch.cuda.is_available():
     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
 
 
-def hpo(device, tuner):
+def hpo(device, tuner, batch):
     experiment = Experiment("local")
     experiment.config.trial_code_directory = "."
     experiment.config.experiment_working_directory = "experiments"
@@ -59,8 +47,12 @@ def hpo(device, tuner):
         "features": {"_type": "choice", "_value": [128, 256, 512, 1024]},
         "lr": {"_type": "loguniform", "_value": [0.0001, 0.1]},
         "momentum": {"_type": "uniform", "_value": [0, 1]},
-        "batch_size": {"_type": "choice", "_value": [1, 4, 32, 64, 128, 256]},
     }
+    if batch == "batch":
+        search_space["batch_size"] = {
+            "_type": "choice",
+            "_value": [1, 4, 32, 64, 128, 256],
+        }
 
     experiment.config.search_space = search_space
     experiment.config.tuner.name = tuner
@@ -80,10 +72,10 @@ def hpo(device, tuner):
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
-        nni.experiment.Experiment.view("ye68zgmp")
+        nni.experiment.Experiment.view("godeaxlj")
 
     elif sys.argv[1] == "hpo":
-        hpo(device, sys.argv[2])
+        hpo(device, sys.argv[2], sys.argv[3])
     else:
         print("Invalid argument")
         print("Example usage: python3 proj1.py train")
