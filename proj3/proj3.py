@@ -75,7 +75,10 @@ def hpo(device, tuner, batch="", use_vgg=False):
         }
 
     experiment.config.max_trial_number = 20
-    experiment.config.trial_concurrency = 20
+    if use_vgg:
+        experiment.config.trial_concurrency = 5
+    else:
+        experiment.config.trial_concurrency = 20
 
     experiment.run(8080)
 
