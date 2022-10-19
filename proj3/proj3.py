@@ -37,7 +37,11 @@ if torch.cuda.is_available():
 
 
 def hpo(device, tuner, batch="", use_vgg=False):
-    name = "VGG-19 HPO " + tuner
+    if use_vgg:
+        name = "VGG-19 HPO "
+    else:
+        name = "MLP HPO "
+    name += tuner
     if batch == "batch":
         name += " Batch"
     experiment = Experiment("local")
@@ -50,7 +54,6 @@ def hpo(device, tuner, batch="", use_vgg=False):
         experiment.config.trial_command = "python model.py n"
 
     search_space = {
-        "features": {"_type": "choice", "_value": [128, 256, 512, 1024]},
         "lr": {"_type": "loguniform", "_value": [0.0001, 0.1]},
         "momentum": {"_type": "uniform", "_value": [0, 1]},
     }
@@ -59,6 +62,7 @@ def hpo(device, tuner, batch="", use_vgg=False):
             "_type": "choice",
             "_value": [1, 4, 32, 64, 128, 256],
         }
+        search_space["features"] = {"_type": "choice", "_value": [128, 256, 512, 1024]}
 
     experiment.config.search_space = search_space
     experiment.config.tuner.name = tuner
@@ -70,11 +74,8 @@ def hpo(device, tuner, batch="", use_vgg=False):
             "eta": 3,
         }
 
-    experiment.config.max_trial_number = 10
-    if use_vgg:
-        experiment.config.trial_concurrency = 100
-    else:
-        experiment.config.trial_concurrency = 10
+    experiment.config.max_trial_number = 20
+    experiment.config.trial_concurrency = 100
 
     experiment.run(8080)
 
