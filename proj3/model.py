@@ -6,6 +6,12 @@ from torchvision import datasets
 from torchvision.transforms import ToTensor
 import torchvision.models as models
 import os
+import sys
+
+if sys.args[1] == "vgg":
+    use_vgg = True
+else:
+    use_vgg = False
 
 device = torch.device(
     "mps"
@@ -52,12 +58,20 @@ elif arc_env:
 else:
     dir = "data"
 
-training_data = datasets.FashionMNIST(
-    root="data", train=True, download=True, transform=ToTensor()
-)
-test_data = datasets.FashionMNIST(
-    root="data", train=False, download=True, transform=ToTensor()
-)
+if use_vgg:
+    training_data = datasets.CIFAR10(
+        root=dir, train=True, download=True, transform=ToTensor()
+    )
+    test_data = datasets.CIFAR10(
+        root=dir, train=False, download=True, transform=ToTensor()
+    )
+else:
+    training_data = datasets.FashionMNIST(
+        root=dir, train=True, download=True, transform=ToTensor()
+    )
+    test_data = datasets.FashionMNIST(
+        root=dir, train=False, download=True, transform=ToTensor()
+    )
 
 batch_size = params["batch_size"]
 
@@ -83,7 +97,10 @@ class MLP(nn.Module):
         return logits
 
 
-model = MLP().to(device)
+if use_vgg:
+    model = models.vgg19().to(device)
+else:
+    model = MLP().to(device)
 
 loss_fn = nn.CrossEntropyLoss()
 optimizer = torch.optim.SGD(
@@ -119,7 +136,10 @@ def test(dataloader, model, loss_fn):
     return correct
 
 
-epochs = 10
+if use_vgg:
+    epochs = 20
+else:
+    epochs = 10
 for t in range(epochs):
     print(f"Epoch {t+1}\n-------------------------------")
     train(train_dataloader, model, loss_fn, optimizer)

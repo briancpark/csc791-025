@@ -13,4 +13,13 @@ cd /jet/home/bpark1/$USER/csc791-025/proj3
 python3 proj3.py hpo TPE
 python3 proj3.py hpo Evolution
 python3 proj3.py hpo Hyperband
+python3 proj3.py hpo TPE batch
+python3 proj3.py hpo Evolution batch
+python3 proj3.py hpo Hyperband batch
 
+python3 proj3.py hpo TPE vgg
+python3 proj3.py hpo Evolution vgg
+python3 proj3.py hpo Hyperband vgg
+python3 proj3.py hpo TPE batch vgg
+python3 proj3.py hpo Evolution batch vgg
+python3 proj3.py hpo Hyperband batch vgg

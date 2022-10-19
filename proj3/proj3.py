@@ -36,12 +36,18 @@ if torch.cuda.is_available():
     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
 
 
-def hpo(device, tuner, batch):
+def hpo(device, tuner, batch="", use_vgg=False):
+    name = "VGG-19 HPO " + tuner
+    if batch == "batch":
+        name += " Batch"
     experiment = Experiment("local")
     experiment.config.trial_code_directory = "."
     experiment.config.experiment_working_directory = "experiments"
-    experiment.config.experiment_name = "VGG-19 HPO " + tuner
-    experiment.config.trial_command = "python model.py"
+    experiment.config.experiment_name = name
+    if use_vgg:
+        experiment.config.trial_command = "python model.py vgg"
+    else:
+        experiment.config.trial_command = "python model.py"
 
     search_space = {
         "features": {"_type": "choice", "_value": [128, 256, 512, 1024]},
@@ -65,7 +71,10 @@ def hpo(device, tuner, batch):
         }
 
     experiment.config.max_trial_number = 10
-    experiment.config.trial_concurrency = 10
+    if use_vgg:
+        experiment.config.trial_concurrency = 100
+    else:
+        experiment.config.trial_concurrency = 10
 
     experiment.run(8080)
 
@@ -75,7 +84,11 @@ if __name__ == "__main__":
         nni.experiment.Experiment.view("godeaxlj")
 
     elif sys.argv[1] == "hpo":
-        hpo(device, sys.argv[2], sys.argv[3])
+        if sys.args[3] == "vgg":
+            use_vgg = True
+        else:
+            use_vgg = False
+        hpo(device, sys.argv[2], sys.argv[3], use_vgg)
     else:
         print("Invalid argument")
         print("Example usage: python3 proj1.py train")
