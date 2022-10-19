@@ -9,4 +9,8 @@ source ~/.bashrc
 conda activate csc791
 
 cd /jet/home/bpark1/$USER/csc791-025/proj3
-nnictl create --config config.yaml --port 8080
+
+python3 proj3.py hpo TPE
+python3 proj3.py hpo Evolution
+python3 proj3.py hpo Hyperband
+
