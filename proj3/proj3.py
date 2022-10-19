@@ -49,7 +49,6 @@ if torch.cuda.is_available():
 
 
 def hpo(device, tuner):
-
     experiment = Experiment("local")
     experiment.config.trial_code_directory = "."
     experiment.config.experiment_working_directory = "experiments"
@@ -74,12 +73,9 @@ def hpo(device, tuner):
         }
 
     experiment.config.max_trial_number = 10
-    experiment.config.trial_concurrency = 2
+    experiment.config.trial_concurrency = 10
 
     experiment.run(8080)
-    command = input("Experiement finished. Enter 'r' to restart, 'q' to quit.\n> ")
-    experiment.stop()
-    return command == 'r'
 
 
 if __name__ == "__main__":
@@ -87,8 +83,7 @@ if __name__ == "__main__":
         nni.experiment.Experiment.view("ye68zgmp")
 
     elif sys.argv[1] == "hpo":
-        while(hpo(device, sys.argv[2])): pass
-
+        hpo(device, sys.argv[2])
     else:
         print("Invalid argument")
         print("Example usage: python3 proj1.py train")
