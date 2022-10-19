@@ -80,8 +80,8 @@ def hpo(device, tuner, batch="", use_vgg=False):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1:
-        nni.experiment.Experiment.view("godeaxlj")
+    if sys.argv[1] == "view":
+        nni.experiment.Experiment.view(sys.argv[2])
 
     elif sys.argv[1] == "hpo":
         if sys.argv[3] == "vgg":
