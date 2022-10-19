@@ -84,7 +84,7 @@ if __name__ == "__main__":
         nni.experiment.Experiment.view("godeaxlj")
 
     elif sys.argv[1] == "hpo":
-        if sys.args[3] == "vgg":
+        if sys.argv[3] == "vgg":
             use_vgg = True
         else:
             use_vgg = False
