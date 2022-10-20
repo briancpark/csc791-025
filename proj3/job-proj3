@@ -1,0 +1,25 @@
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 1
+#SBATCH -p GPU-shared
+#SBATCH -t 10:00:00
+#SBATCH --gres=gpu:1
+
+source ~/.bashrc
+conda activate csc791
+
+cd /jet/home/$USER/csc791-025/proj3
+
+python3 proj3.py hpo TPE n
+python3 proj3.py hpo Evolution n
+python3 proj3.py hpo Hyperband n
+python3 proj3.py hpo TPE batch n
+python3 proj3.py hpo Evolution batch n
+python3 proj3.py hpo Hyperband batch n
+
+python3 proj3.py hpo TPE vgg
+python3 proj3.py hpo Evolution vgg
+python3 proj3.py hpo Hyperband vgg
+python3 proj3.py hpo TPE batch vgg
+python3 proj3.py hpo Evolution batch vgg
+python3 proj3.py hpo Hyperband batch vgg
