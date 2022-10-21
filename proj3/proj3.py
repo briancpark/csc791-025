@@ -35,11 +35,9 @@ if torch.cuda.is_available():
 
 
 def hpo(device, tuner, advanced=False, use_vgg=False):
-    if use_vgg:
-        name = "VGG-11 HPO "
-    else:
-        name = "MLP HPO "
+    name = "VGG-11 HPO " if use_vgg else "MLP HPO "
     name += tuner
+    name += " Advanced" if advanced else " Default"
 
     experiment = Experiment("local")
     experiment.config.trial_code_directory = "."
@@ -57,8 +55,9 @@ def hpo(device, tuner, advanced=False, use_vgg=False):
             "_type": "choice",
             "_value": [1, 4, 32, 64, 128, 256],
         },
-        "features": {"_type": "choice", "_value": [128, 256, 512, 1024]},
     }
+    if not use_vgg:
+        search_space["features"] = {"_type": "choice", "_value": [128, 256, 512, 1024]}
 
     experiment.config.search_space = search_space
     experiment.config.tuner.name = tuner
@@ -72,9 +71,9 @@ def hpo(device, tuner, advanced=False, use_vgg=False):
                     "constant_liar_type": "mean",
                     "n_startup_jobs": 10,
                     "n_ei_candidates": 20,
-                    "linear_forgetting": 100,
-                    "prior_weight": 0,
-                    "gamma": 0.5,
+                    "linear_forgetting": 50,
+                    "prior_weight": 0.9,
+                    "gamma": 0.1,
                 },
             }
         if tuner == "Evolution":
