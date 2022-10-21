@@ -65,7 +65,7 @@ def hpo(device, tuner, advanced=False, use_vgg=False):
 
     if advanced:
         if tuner == "TPE":
-            config.tuner.class_args = {
+            experiment.config.tuner.class_args = {
                 "seed": 42,
                 "tpe_args": {
                     "constant_liar_type": "mean",
@@ -77,7 +77,7 @@ def hpo(device, tuner, advanced=False, use_vgg=False):
                 },
             }
         if tuner == "Evolution":
-            config.tuner.class_args = {"population_size": 50}
+            experiment.config.tuner.class_args = {"population_size": 50}
         if tuner == "Hyperband":
             experiment.config.tuner.class_args = {
                 "optimize_mode": "maximize",
