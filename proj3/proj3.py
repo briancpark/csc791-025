@@ -22,8 +22,6 @@ torch.manual_seed(42)
 # Setup directory and environment variables
 arc_env = os.path.exists("/mnt/beegfs/" + os.environ["USER"])
 os.system("mkdir -p figures")
-os.system("mkdir -p models")
-os.system("mkdir -p logs")
 
 if torch.cuda.is_available():
     # The flag below controls whether to allow TF32 on matmul. This flag defaults to False
@@ -36,14 +34,11 @@ if torch.cuda.is_available():
     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
 
 
-def hpo(device, tuner, batch="", use_vgg=False):
-    if use_vgg:
-        name = "VGG-19 HPO "
-    else:
-        name = "MLP HPO "
+def hpo(device, tuner, advanced=False, use_vgg=False):
+    name = "VGG-11 HPO " if use_vgg else "MLP HPO "
     name += tuner
-    if batch == "batch":
-        name += " Batch"
+    name += " Advanced" if advanced else " Default"
+
     experiment = Experiment("local")
     experiment.config.trial_code_directory = "."
     experiment.config.experiment_working_directory = "experiments"
@@ -56,23 +51,49 @@ def hpo(device, tuner, batch="", use_vgg=False):
     search_space = {
         "lr": {"_type": "loguniform", "_value": [0.0001, 0.1]},
         "momentum": {"_type": "uniform", "_value": [0, 1]},
-    }
-    if batch == "batch":
-        search_space["batch_size"] = {
+        "batch_size": {
             "_type": "choice",
             "_value": [1, 4, 32, 64, 128, 256],
-        }
+        },
+    }
+    if not use_vgg:
         search_space["features"] = {"_type": "choice", "_value": [128, 256, 512, 1024]}
 
     experiment.config.search_space = search_space
     experiment.config.tuner.name = tuner
     experiment.config.tuner.class_args["optimize_mode"] = "maximize"
-    if tuner == "Hyperband":
-        experiment.config.tuner.class_args = {
-            "optimize_mode": "maximize",
-            "R": 60,
-            "eta": 3,
-        }
+
+    if advanced:
+        if tuner == "TPE":
+            experiment.config.tuner.class_args = {
+                "seed": 42,
+                "tpe_args": {
+                    "constant_liar_type": "mean",
+                    "n_startup_jobs": 10,
+                    "n_ei_candidates": 20,
+                    "linear_forgetting": 50,
+                    "prior_weight": 0.9,
+                    "gamma": 0.1,
+                },
+            }
+        if tuner == "Evolution":
+            experiment.config.tuner.class_args = {"population_size": 50}
+        if tuner == "Hyperband":
+            experiment.config.tuner.class_args = {
+                "optimize_mode": "maximize",
+                "R": 60,
+                "eta": 3,
+                "exec_mode": "parallelism",
+            }
+    else:
+        # Default to minimal config
+        if tuner == "Hyperband":
+            experiment.config.tuner.class_args = {
+                "optimize_mode": "maximize",
+                "R": 100,
+                "eta": 25,
+                "exec_mode": "parallelism",
+            }
 
     experiment.config.max_trial_number = 20
     if use_vgg:
@@ -88,11 +109,10 @@ if __name__ == "__main__":
         nni.experiment.Experiment.view(sys.argv[2])
 
     elif sys.argv[1] == "hpo":
-        if sys.argv[3] == "vgg":
-            use_vgg = True
-        else:
-            use_vgg = False
-        hpo(device, sys.argv[2], sys.argv[3], use_vgg)
+        use_vgg = sys.argv[3] == "vgg"
+        advanced = sys.argv[4] == "advanced"
+
+        hpo(device, sys.argv[2], advanced, use_vgg)
     else:
         print("Invalid argument")
         print("Example usage: python3 proj1.py train")
