@@ -98,7 +98,7 @@ class MLP(nn.Module):
 
 
 if use_vgg:
-    model = models.vgg19().to(device)
+    model = models.vgg11().to(device)
 else:
     model = MLP().to(device)
 
