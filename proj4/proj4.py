@@ -13,6 +13,10 @@ import torch.nn.functional as F
 import torch.onnx
 from nni.compression.pytorch.pruning import *
 from nni.compression.pytorch.speedup import ModelSpeedup
+from torchvision.models import densenet201
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
+import torch.distributed as dist
 
 device = torch.device(
     "mps"
@@ -21,6 +25,9 @@ device = torch.device(
     if torch.cuda.is_available()
     else "cpu"
 )
+
+if not os.path.exists("logs"):
+    os.mkdir("logs")
 
 print("Using device:", device.type.upper())
 
@@ -39,8 +46,8 @@ if torch.cuda.is_available():
 else:
     num_gpus = 1  # Placeholder
 
-batch_size = 512 * num_gpus
-test_batch_size = 1024 * num_gpus
+batch_size = 1024 * num_gpus
+test_batch_size = 2048 * num_gpus
 pin_memory = True
 kd_T = 4
 
@@ -59,12 +66,19 @@ class DistillKL(nn.Module):
         return loss
 
 
-def train(dataloader, model, loss_fn, optimizer):
+def train(dataloader, model, loss_fn, optimizer, distributed=False, rank=-1):
     size = len(dataloader.dataset)
     model.train()
-    t_iter = tqdm(dataloader)
 
-    for batch, (X, y) in enumerate(dt_iter):
+    if rank != -1:
+        device = rank
+
+    if distributed:
+        t_iter = dataloader
+    else:
+        t_iter = tqdm(dataloader)
+
+    for batch, (X, y) in enumerate(t_iter):
         X, y = X.to(device), y.to(device)
         pred = model(X)
         loss = loss_fn(pred, y)
@@ -79,9 +93,8 @@ def kd_train(train_loader, model_s, model_t, optimizer):
     model_s.train()
     model_t.eval()
     size = len(train_loader.dataset)
-    t_iter = tqdm(train_loader)
 
-    for batch_idx, (data, target) in enumerate(t_iter):
+    for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         y_s = model_s(data)
@@ -94,13 +107,20 @@ def kd_train(train_loader, model_s, model_t, optimizer):
         loss.backward()
 
 
-def test(dataloader, model, loss_fn):
+def test(dataloader, model, loss_fn, distributed=False, rank=-1):
     size = len(dataloader.dataset)
+    if rank != -1:
+        device = rank
+    if distributed:
+        t_iter = dataloader
+    else:
+        t_iter = tqdm(dataloader)
+
     num_batches = len(dataloader)
     model.eval()
     test_loss, correct = 0, 0
     with torch.no_grad():
-        for X, y in tqdm(dataloader):
+        for X, y in t_iter:
             X, y = X.to(device), y.to(device)
             pred = model(X)
             test_loss += loss_fn(pred, y).item()
@@ -108,6 +128,136 @@ def test(dataloader, model, loss_fn):
     test_loss /= num_batches
     correct /= size
     return correct, test_loss
+
+
+### DISTRIBUTED TRAINING
+
+
+def setup(rank, world_size):
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "12355"
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
+
+def cleanup():
+    dist.destroy_process_group()
+
+
+def prepare(rank, world_size, batch_size=batch_size, pin_memory=True, num_workers=0):
+    # https://blog.jovian.ai/image-classification-of-cifar100-dataset-using-pytorch-8b7145242df1
+    stats = ((0.5074, 0.4867, 0.4411), (0.2011, 0.1987, 0.2025))
+    train_transform = transforms.Compose(
+        [
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomCrop(32, padding=4, padding_mode="reflect"),
+            transforms.ToTensor(),
+            transforms.Normalize(*stats),
+        ]
+    )
+
+    test_transform = transforms.Compose(
+        [transforms.ToTensor(), transforms.Normalize(*stats)]
+    )
+
+    train_data = datasets.CIFAR100(
+        download=True, root="data", transform=train_transform
+    )
+    test_data = datasets.CIFAR100(root="data", train=False, transform=test_transform)
+
+    sampler = DistributedSampler(
+        train_data, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False
+    )
+
+    train_dataloader = DataLoader(
+        train_data,
+        batch_size=batch_size,
+        pin_memory=pin_memory,
+        num_workers=num_workers,
+        drop_last=False,
+        shuffle=False,
+        sampler=sampler,
+    )
+    test_dataloader = DataLoader(
+        test_data,
+        batch_size=batch_size,
+        pin_memory=pin_memory,
+        num_workers=num_workers,
+        drop_last=False,
+        shuffle=False,
+    )
+
+    return train_dataloader, test_dataloader
+
+
+def distributed_training(rank, world_size):
+    setup(rank, world_size)
+    train_dataloader, test_dataloader = prepare(rank, world_size)
+
+    model = densenet201().to(rank)
+    dpp_model = DDP(
+        model, device_ids=[rank], output_device=rank, find_unused_parameters=False
+    )
+
+    optimizer = torch.optim.SGD(
+        dpp_model.parameters(), lr=params["lr"], momentum=params["momentum"]
+    )
+    loss_fn = nn.CrossEntropyLoss()
+
+    with open("logs/densenet201.log", "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(
+            [
+                "epoch",
+                "train_accuracy",
+                "train_loss",
+                "test_accuracy",
+                "test_loss",
+            ]
+        )
+
+    epochs = 200
+    for t in range(epochs):
+        train(
+            train_dataloader, dpp_model, loss_fn, optimizer, distributed=True, rank=rank
+        )
+        test_accuracy, test_loss = test(
+            test_dataloader, dpp_model, loss_fn, distributed=True, rank=rank
+        )
+        train_accuracy, train_loss = test(
+            train_dataloader, dpp_model, loss_fn, distributed=True, rank=rank
+        )
+
+        # On main rank, print and save intermediate results
+        if rank == 0:
+            print(f"Epoch {t+1}\n-------------------------------")
+            print(f"Accuracy: {train_accuracy * 100}%, Train Loss: {train_loss}")
+            print(f"Accuracy: {test_accuracy * 100}%, Test Loss: {test_loss}")
+
+            with open("logs/densenet201.log", "a") as fh:
+                writer = csv.writer(fh)
+                writer.writerow(
+                    [t, train_accuracy, train_loss, test_accuracy, test_loss]
+                )
+
+            # Save checkpoint
+            torch.save(dpp_model.state_dict(), "models/densenet201.pt")
+
+        # Use a barrier() to make sure that process 1 loads the model after process
+        # 0 saves it.
+        dist.barrier()
+
+        if test_accuracy > 0.9:
+            cleanup()
+            break
+
+    cleanup()
+
+
+def distributed():
+    import torch.multiprocessing as mp
+
+    world_size = num_gpus
+    mp.spawn(distributed_training, args=(world_size,), nprocs=world_size)
 
 
 def knowledge_dist():
@@ -310,12 +460,9 @@ def post_process():
 
 
 if __name__ == "__main__":
+    distributed()
     # prune()
     # knowledge_dist()
-    convert_torch_to_onnx()
-    pre_process()
-    post_process()
-
-
-# tvmc compile --target "llvm" --input-shapes "data:[1,3,224,224]" --output resnet50-v2-7-tvm.tar resnet.onnx
-# This may take several minutes depending on your machine
+    # convert_torch_to_onnx()
+    # pre_process()
+    # post_process()
