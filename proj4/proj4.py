@@ -1,11 +1,12 @@
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torchvision import datasets
 from torchvision.transforms import ToTensor
 import torchvision.transforms as transforms
-from torchvision.models import densenet121, densenet201, DenseNet201_Weights
+from torchvision.models import resnet18, resnet152
 import os
+import csv
 import sys
 from tqdm import tqdm
 import torch.nn.functional as F
@@ -26,17 +27,40 @@ print("Using device:", device.type.upper())
 torch.manual_seed(42)
 
 params = {
-    "features": 512,
     "lr": 0.001,
     "momentum": 0,
-    "batch_size": 64,
 }
+
+num_gpus = int(
+    os.popen("nvidia-smi --query-gpu=name --format=csv,noheader | wc -l").read()
+)
+
+batch_size = 512 * num_gpus
+test_batch_size = 1024 * num_gpus
+pin_memory = True
+kd_T = 4
+
+
+class DistillKL(nn.Module):
+    """Distilling the Knowledge in a Neural Network"""
+
+    def __init__(self, T):
+        super(DistillKL, self).__init__()
+        self.T = T
+
+    def forward(self, y_s, y_t):
+        p_s = F.log_softmax(y_s / self.T, dim=1)
+        p_t = F.softmax(y_t / self.T, dim=1)
+        loss = F.kl_div(p_s, p_t, size_average=False) * (self.T**2) / y_s.shape[0]
+        return loss
 
 
 def train(dataloader, model, loss_fn, optimizer):
     size = len(dataloader.dataset)
     model.train()
-    for batch, (X, y) in tqdm(enumerate(dataloader)):
+    t_iter = tqdm(dataloader)
+
+    for batch, (X, y) in enumerate(dt_iter):
         X, y = X.to(device), y.to(device)
         pred = model(X)
         loss = loss_fn(pred, y)
@@ -46,21 +70,24 @@ def train(dataloader, model, loss_fn, optimizer):
 
 
 def kd_train(train_loader, model_s, model_t, optimizer):
-    for batch_idx, (data, target) in tqdm(enumerate(train_loader)):
+    cri_kd = DistillKL(kd_T)
+
+    model_s.train()
+    model_t.eval()
+    size = len(train_loader.dataset)
+    t_iter = tqdm(train_loader)
+
+    for batch_idx, (data, target) in enumerate(t_iter):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         y_s = model_s(data)
         y_t = model_t(data)
+
         loss_cri = F.cross_entropy(y_s, target)
-
-    # kd loss
-    p_s = F.log_softmax(y_s / kd_T, dim=1)
-    p_t = F.softmax(y_t / kd_T, dim=1)
-    loss_kd = F.kl_div(p_s, p_t, size_average=False) * (self.T**2) / y_s.shape[0]
-
-    # total loss
-    loss = loss_cir + loss_kd
-    loss.backward()
+        loss_kd = cri_kd(y_s, y_t)
+        # total loss
+        loss = loss_cri + loss_kd
+        loss.backward()
 
 
 def test(dataloader, model, loss_fn):
@@ -76,7 +103,7 @@ def test(dataloader, model, loss_fn):
             correct += (pred.argmax(1) == y).type(torch.float).sum().item()
     test_loss /= num_batches
     correct /= size
-    return correct
+    return correct, test_loss
 
 
 def knowledge_dist():
@@ -124,50 +151,81 @@ def knowledge_dist():
         ),
     )
 
-    batch_size = params["batch_size"]
+    train_dataloader = Subset(training_data, range(50000))
+    test_dataloader = Subset(test_data, range(10000))
 
-    train_dataloader = DataLoader(training_data, batch_size=batch_size, pin_memory=True)
-    test_dataloader = DataLoader(test_data, batch_size=batch_size, pin_memory=True)
+    train_dataloader = DataLoader(
+        train_dataloader, batch_size=batch_size, pin_memory=pin_memory, shuffle=True
+    )
+    test_dataloader = DataLoader(
+        test_dataloader, batch_size=test_batch_size, pin_memory=pin_memory, shuffle=True
+    )
 
-    t_model = densenet201(weights="DenseNet201_Weights.IMAGENET1K_V1").to(device)
+    t_model = resnet18(weights="ResNet18_Weights.IMAGENET1K_V1").to(device)
     s_model = torch.load("models/student_model.pt", map_location=device).to(device)
+
+    t_model = torch.nn.DataParallel(t_model)
+    s_model = torch.nn.DataParallel(s_model)
 
     loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.SGD(
         s_model.parameters(), lr=params["lr"], momentum=params["momentum"]
     )
 
+    with open("kd.log", "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(
+            [
+                "epoch",
+                "test_accuracy",
+                "test_loss",
+            ]
+        )
+
     epochs = 10
     for t in range(epochs):
+        if os.path.exists("models/student_model_kd.pt"):
+            s_model = torch.load("models/student_model_kd.pt", map_location=device).to(
+                device
+            )
         print(f"Epoch {t+1}\n-------------------------------")
-        # train(train_dataloader, t_model, loss_fn, optimizer)
         kd_train(train_dataloader, s_model, t_model, optimizer)
-        # accuracy = test(test_dataloader, t_model, loss_fn)
-        accuracy = test(test_dataloader, s_model, loss_fn)
-        print("Accuracy:", accuracy)
+        test_accuracy, test_loss = test(test_dataloader, s_model, loss_fn)
+        print(
+            "Accuracy: {:0.2e}%, Test Loss: {:0.2e}".format(
+                test_accuracy * 100, test_loss
+            )
+        )
+        torch.save(s_model, "models/student_model_kd.pt")
+        with open("kd.log", "a") as fh:
+            writer = csv.writer(fh)
+            writer.writerow([t, test_accuracy, test_loss])
 
 
 def prune():
-    s_model = densenet121().to(device)
+    s_model = resnet18(weights="ResNet18_Weights.IMAGENET1K_V1").to(device)
 
     config_list = [
         {
             "sparsity_per_layer": 0.1,
-            "op_types": ["Conv2d", "Linear"],
+            "op_types": ["Conv2d"],
         },
     ]
-    retrain_epochs = 20
 
     pruner = L1NormPruner(s_model, config_list)
     s_model, masks = pruner.compress()
     pruner._unwrap_model()
-    random_input = torch.randn(64, 3, 256, 256).to(device)
+    random_input = torch.randn(batch_size, 3, 224, 224).to(device)
 
     ModelSpeedup(s_model, random_input, masks, device).speedup_model()
 
     torch.save(s_model, "models/student_model.pt")
 
 
+def tvm():
+    pass
+
+
 if __name__ == "__main__":
-    # prune()
+    prune()
     knowledge_dist()
