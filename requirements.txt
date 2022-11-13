@@ -12,3 +12,4 @@ nvidia-tensorrt
 onnx
 pycuda
 apache-tvm
+tqdm
