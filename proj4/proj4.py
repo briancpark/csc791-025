@@ -131,12 +131,11 @@ def knowledge_dist():
 
     t_model = densenet201(weights="DenseNet201_Weights.IMAGENET1K_V1").to(device)
     s_model = torch.load("models/student_model.pt", map_location=device).to(device)
-    
+
     loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.SGD(
         s_model.parameters(), lr=params["lr"], momentum=params["momentum"]
     )
-
 
     epochs = 10
     for t in range(epochs):
@@ -172,4 +171,3 @@ def prune():
 if __name__ == "__main__":
     # prune()
     knowledge_dist()
-    
