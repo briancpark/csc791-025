@@ -10,6 +10,7 @@ import csv
 import sys
 from tqdm import tqdm
 import torch.nn.functional as F
+import torch.onnx
 from nni.compression.pytorch.pruning import *
 from nni.compression.pytorch.speedup import ModelSpeedup
 
@@ -31,9 +32,12 @@ params = {
     "momentum": 0,
 }
 
-num_gpus = int(
-    os.popen("nvidia-smi --query-gpu=name --format=csv,noheader | wc -l").read()
-)
+if torch.cuda.is_available():
+    num_gpus = int(
+        os.popen("nvidia-smi --query-gpu=name --format=csv,noheader | wc -l").read()
+    )
+else:
+    num_gpus = 1  # Placeholder
 
 batch_size = 512 * num_gpus
 test_batch_size = 1024 * num_gpus
@@ -222,10 +226,96 @@ def prune():
     torch.save(s_model, "models/student_model.pt")
 
 
-def tvm():
-    pass
+def convert_torch_to_onnx():
+    x = torch.randn(1, 3, 224, 224)
+    resnet18_model = resnet18(weights="ResNet18_Weights.IMAGENET1K_V1")
+    resnet18_kd_model = torch.load("models/student_model_kd.pt").module.to("cpu")
+
+    torch.onnx.export(
+        resnet18_model,
+        x,
+        "resnet18.onnx",
+        export_params=True,
+        input_names=["data"],
+        output_names=["output"],
+    )
+
+    torch.onnx.export(
+        resnet18_kd_model,
+        x,
+        "resnet18_kd.onnx",
+        export_params=True,
+        input_names=["data"],
+        output_names=["output"],
+    )
+
+
+def pre_process():
+    from tvm.contrib.download import download_testdata
+    from PIL import Image
+    import numpy as np
+
+    img_url = "https://s3.amazonaws.com/model-server/inputs/kitten.jpg"
+    img_path = download_testdata(img_url, "imagenet_cat.png", module="data")
+
+    # Resize it to 224x224
+    resized_image = Image.open(img_path).resize((224, 224))
+    img_data = np.asarray(resized_image).astype("float32")
+
+    # ONNX expects NCHW input, so convert the array
+    img_data = np.transpose(img_data, (2, 0, 1))
+
+    # Normalize according to ImageNet
+    imagenet_mean = np.array([0.485, 0.456, 0.406])
+    imagenet_stddev = np.array([0.229, 0.224, 0.225])
+    norm_img_data = np.zeros(img_data.shape).astype("float32")
+    for i in range(img_data.shape[0]):
+        norm_img_data[i, :, :] = (
+            img_data[i, :, :] / 255 - imagenet_mean[i]
+        ) / imagenet_stddev[i]
+
+    # Add batch dimension
+    img_data = np.expand_dims(norm_img_data, axis=0)
+
+    # Save to .npz (outputs imagenet_cat.npz)
+    np.savez("imagenet_cat", data=img_data)
+
+
+def post_process():
+    import os.path
+    import numpy as np
+
+    from scipy.special import softmax
+
+    from tvm.contrib.download import download_testdata
+
+    # Download a list of labels
+    labels_url = "https://s3.amazonaws.com/onnx-model-zoo/synset.txt"
+    labels_path = download_testdata(labels_url, "synset.txt", module="data")
+
+    with open(labels_path, "r") as f:
+        labels = [l.rstrip() for l in f]
+
+    output_file = "predictions.npz"
+
+    # Open the output and read the output tensor
+    if os.path.exists(output_file):
+        with np.load(output_file) as data:
+            scores = softmax(data["output_0"])
+            scores = np.squeeze(scores)
+            ranks = np.argsort(scores)[::-1]
+
+            for rank in ranks[0:5]:
+                print("class='%s' with probability=%f" % (labels[rank], scores[rank]))
 
 
 if __name__ == "__main__":
-    prune()
-    knowledge_dist()
+    # prune()
+    # knowledge_dist()
+    convert_torch_to_onnx()
+    pre_process()
+    post_process()
+
+
+# tvmc compile --target "llvm" --input-shapes "data:[1,3,224,224]" --output resnet50-v2-7-tvm.tar resnet.onnx
+# This may take several minutes depending on your machine
