@@ -38,7 +38,6 @@ params = {
 batch_size = 1024
 test_batch_size = 2048
 pin_memory = True
-kd_T = 4
 
 
 class DistillKL(nn.Module):
@@ -70,7 +69,7 @@ def train(dataloader, model, loss_fn, optimizer):
         optimizer.step()
 
 
-def kd_train(train_loader, model_s, model_t, optimizer):
+def kd_train(train_loader, model_s, model_t, optimizer, kd_T):
     cri_kd = DistillKL(kd_T)
 
     model_s.train()
@@ -143,54 +142,67 @@ def knowledge_dist():
         dataset2, pin_memory=pin_memory, batch_size=test_batch_size, shuffle=True
     )
 
-    t_model = torch.load("models/cifar10_resnet101.pt", map_location=device)
-    s_model = torch.load("models/student_model.pt", map_location=device)
+    temperatures = [1, 5, 10, 15, 20]
 
-    loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(
-        s_model.parameters(), lr=params["lr"], momentum=params["momentum"]
-    )
+    for kd_T in temperatures:
+        t_model = torch.load("models/cifar10_resnet101.pt", map_location=device)
+        s_model = torch.load("models/student_model.pt", map_location=device)
 
-    with open("logs/kd.log", "w", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(
-            [
-                "epoch",
-                "student_train_accuracy",
-                "student_train_loss",
-                "student_test_accuracy",
-                "student_test_loss",
-            ]
+        loss_fn = nn.CrossEntropyLoss()
+        optimizer = torch.optim.SGD(
+            s_model.parameters(), lr=params["lr"], momentum=params["momentum"]
         )
 
-    epochs = 200
-
-    t_test_accuracy, t_test_loss = test(test_dataloader, t_model, loss_fn)
-    print(
-        "Teacher model accuracy: ", t_test_accuracy, "Teacher model loss: ", t_test_loss
-    )
-    for t in range(epochs):
-        if os.path.exists("models/student_model_kd.pt"):
-            s_model = torch.load("models/student_model_kd.pt", map_location=device).to(
-                device
-            )
-        print(f"Epoch {t+1}\n-------------------------------")
-        kd_train(train_dataloader, s_model, t_model, optimizer)
-        s_train_accuracy, s_train_loss = test(train_dataloader, t_model, loss_fn)
-        s_test_accuracy, s_test_loss = test(test_dataloader, s_model, loss_fn)
-
-        print(
-            f"Student Train Accuracy: {s_test_accuracy * 100}%, Test Loss: {s_train_loss}"
-        )
-        print(
-            f"Student Test Accuracy: {s_test_accuracy * 100}%, Test Loss: {s_test_loss}"
-        )
-        torch.save(s_model, "models/student_model_kd.pt")
-        with open("logs/kd.log", "a") as fh:
+        with open("logs/kd_{kd_T}.log", "w", newline="") as fh:
             writer = csv.writer(fh)
             writer.writerow(
-                [t, s_train_accuracy, s_train_loss, s_test_accuracy, s_test_loss]
+                [
+                    "epoch",
+                    "student_train_accuracy",
+                    "student_train_loss",
+                    "student_test_accuracy",
+                    "student_test_loss",
+                ]
             )
+
+        epochs = 200
+
+        t_train_accuracy, t_train_loss = test(train_dataloader, t_model, loss_fn)
+        t_test_accuracy, t_test_loss = test(test_dataloader, t_model, loss_fn)
+        print(
+            "Teacher model train accuracy: ",
+            t_train_accuracy,
+            "Teacher model train loss: ",
+            t_train_loss,
+        )
+        print(
+            "Teacher model test accuracy: ",
+            t_test_accuracy,
+            "Teacher model test loss: ",
+            t_test_loss,
+        )
+        for t in range(epochs):
+            if os.path.exists(f"models/student_model_kd_{kd_T}.pt"):
+                s_model = torch.load(
+                    f"models/student_model_kd_{kd_T}.pt", map_location=device
+                ).to(device)
+            print(f"Epoch {t+1}\n-------------------------------")
+            kd_train(train_dataloader, s_model, t_model, optimizer, kd_T)
+            s_train_accuracy, s_train_loss = test(train_dataloader, t_model, loss_fn)
+            s_test_accuracy, s_test_loss = test(test_dataloader, s_model, loss_fn)
+
+            print(
+                f"Student Train Accuracy: {s_train_accuracy * 100}%, Student Train Loss: {s_train_loss}"
+            )
+            print(
+                f"Student Test Accuracy: {s_test_accuracy * 100}%, Student Test Loss: {s_test_loss}"
+            )
+            torch.save(s_model, f"models/student_model_kd_{kd_T}.pt")
+            with open(f"logs/kd_{kd_T}.log", "a") as fh:
+                writer = csv.writer(fh)
+                writer.writerow(
+                    [t, s_train_accuracy, s_train_loss, s_test_accuracy, s_test_loss]
+                )
 
 
 def prune():
