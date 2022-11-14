@@ -3,7 +3,7 @@
 #SBATCH -n 1
 #SBATCH -p GPU-shared
 #SBATCH -t 24:00:00
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:1
 
 source ~/.bashrc
 
