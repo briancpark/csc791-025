@@ -13,10 +13,6 @@ import torch.nn.functional as F
 import torch.onnx
 from nni.compression.pytorch.pruning import *
 from nni.compression.pytorch.speedup import ModelSpeedup
-from torchvision.models import densenet201
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data.distributed import DistributedSampler
-import torch.distributed as dist
 
 device = torch.device(
     "mps"
@@ -36,18 +32,11 @@ torch.manual_seed(42)
 
 params = {
     "lr": 0.001,
-    "momentum": 0,
+    "momentum": 0.7,
 }
 
-if torch.cuda.is_available():
-    num_gpus = int(
-        os.popen("nvidia-smi --query-gpu=name --format=csv,noheader | wc -l").read()
-    )
-else:
-    num_gpus = 1  # Placeholder
-
-batch_size = 1024 * num_gpus
-test_batch_size = 2048 * num_gpus
+batch_size = 1024
+test_batch_size = 2048
 pin_memory = True
 kd_T = 4
 
@@ -66,17 +55,11 @@ class DistillKL(nn.Module):
         return loss
 
 
-def train(dataloader, model, loss_fn, optimizer, distributed=False, rank=-1):
+def train(dataloader, model, loss_fn, optimizer):
     size = len(dataloader.dataset)
     model.train()
 
-    if rank != -1:
-        device = rank
-
-    if distributed:
-        t_iter = dataloader
-    else:
-        t_iter = tqdm(dataloader)
+    t_iter = tqdm(dataloader)
 
     for batch, (X, y) in enumerate(t_iter):
         X, y = X.to(device), y.to(device)
@@ -107,14 +90,10 @@ def kd_train(train_loader, model_s, model_t, optimizer):
         loss.backward()
 
 
-def test(dataloader, model, loss_fn, distributed=False, rank=-1):
+def test(dataloader, model, loss_fn):
     size = len(dataloader.dataset)
-    if rank != -1:
-        device = rank
-    if distributed:
-        t_iter = dataloader
-    else:
-        t_iter = tqdm(dataloader)
+
+    t_iter = tqdm(dataloader)
 
     num_batches = len(dataloader)
     model.eval()
@@ -130,138 +109,7 @@ def test(dataloader, model, loss_fn, distributed=False, rank=-1):
     return correct, test_loss
 
 
-### DISTRIBUTED TRAINING
-
-
-def setup(rank, world_size):
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-
-
-def cleanup():
-    dist.destroy_process_group()
-
-
-def prepare(rank, world_size, batch_size=batch_size, pin_memory=True, num_workers=0):
-    # https://blog.jovian.ai/image-classification-of-cifar100-dataset-using-pytorch-8b7145242df1
-    stats = ((0.5074, 0.4867, 0.4411), (0.2011, 0.1987, 0.2025))
-    train_transform = transforms.Compose(
-        [
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomCrop(32, padding=4, padding_mode="reflect"),
-            transforms.ToTensor(),
-            transforms.Normalize(*stats),
-        ]
-    )
-
-    test_transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize(*stats)]
-    )
-
-    train_data = datasets.CIFAR100(
-        download=True, root="data", transform=train_transform
-    )
-    test_data = datasets.CIFAR100(root="data", train=False, transform=test_transform)
-
-    sampler = DistributedSampler(
-        train_data, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False
-    )
-
-    train_dataloader = DataLoader(
-        train_data,
-        batch_size=batch_size,
-        pin_memory=pin_memory,
-        num_workers=num_workers,
-        drop_last=False,
-        shuffle=False,
-        sampler=sampler,
-    )
-    test_dataloader = DataLoader(
-        test_data,
-        batch_size=batch_size,
-        pin_memory=pin_memory,
-        num_workers=num_workers,
-        drop_last=False,
-        shuffle=False,
-    )
-
-    return train_dataloader, test_dataloader
-
-
-def distributed_training(rank, world_size):
-    setup(rank, world_size)
-    train_dataloader, test_dataloader = prepare(rank, world_size)
-
-    model = densenet201().to(rank)
-    dpp_model = DDP(
-        model, device_ids=[rank], output_device=rank, find_unused_parameters=False
-    )
-
-    optimizer = torch.optim.SGD(
-        dpp_model.parameters(), lr=params["lr"], momentum=params["momentum"]
-    )
-    loss_fn = nn.CrossEntropyLoss()
-
-    with open("logs/densenet201.log", "w", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(
-            [
-                "epoch",
-                "train_accuracy",
-                "train_loss",
-                "test_accuracy",
-                "test_loss",
-            ]
-        )
-
-    epochs = 200
-    for t in range(epochs):
-        train(
-            train_dataloader, dpp_model, loss_fn, optimizer, distributed=True, rank=rank
-        )
-        test_accuracy, test_loss = test(
-            test_dataloader, dpp_model, loss_fn, distributed=True, rank=rank
-        )
-        train_accuracy, train_loss = test(
-            train_dataloader, dpp_model, loss_fn, distributed=True, rank=rank
-        )
-
-        # On main rank, print and save intermediate results
-        if rank == 0:
-            print(f"Epoch {t+1}\n-------------------------------")
-            print(f"Accuracy: {train_accuracy * 100}%, Train Loss: {train_loss}")
-            print(f"Accuracy: {test_accuracy * 100}%, Test Loss: {test_loss}")
-
-            with open("logs/densenet201.log", "a") as fh:
-                writer = csv.writer(fh)
-                writer.writerow(
-                    [t, train_accuracy, train_loss, test_accuracy, test_loss]
-                )
-
-            # Save checkpoint
-            torch.save(dpp_model.state_dict(), "models/densenet201.pt")
-
-        # Use a barrier() to make sure that process 1 loads the model after process
-        # 0 saves it.
-        dist.barrier()
-
-        if test_accuracy > 0.9:
-            cleanup()
-            break
-
-    cleanup()
-
-
-def distributed():
-    import torch.multiprocessing as mp
-
-    world_size = num_gpus
-    mp.spawn(distributed_training, args=(world_size,), nprocs=world_size)
-
-
 def knowledge_dist():
-
     if torch.cuda.is_available():
         # The flag below controls whether to allow TF32 on matmul. This flag defaults to False
         # in PyTorch 1.12 and later.
@@ -273,70 +121,54 @@ def knowledge_dist():
 
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
 
-    dir = "/ocean/datasets/community/imagenet"
-
-    traindir = os.path.join(dir, "train")
-    valdir = os.path.join(dir, "val")
-    normalize = transforms.Normalize(
-        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+    transform = transforms.Compose(
+        [
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomCrop(32, padding=4),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[n / 255.0 for n in [129.3, 124.1, 112.4]],
+                std=[n / 255.0 for n in [68.2, 65.4, 70.4]],
+            ),
+        ]
     )
 
-    training_data = datasets.ImageFolder(
-        traindir,
-        transforms.Compose(
-            [
-                transforms.RandomResizedCrop(224),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                normalize,
-            ]
-        ),
-    )
-
-    test_data = datasets.ImageFolder(
-        valdir,
-        transforms.Compose(
-            [
-                transforms.Resize(256),
-                transforms.CenterCrop(224),
-                transforms.ToTensor(),
-                normalize,
-            ]
-        ),
-    )
-
-    train_dataloader = Subset(training_data, range(50000))
-    test_dataloader = Subset(test_data, range(10000))
+    dataset1 = datasets.CIFAR10("data", train=True, download=True, transform=transform)
+    dataset2 = datasets.CIFAR10("data", train=False, transform=transform)
 
     train_dataloader = DataLoader(
-        train_dataloader, batch_size=batch_size, pin_memory=pin_memory, shuffle=True
+        dataset1, pin_memory=pin_memory, batch_size=batch_size, shuffle=True
     )
     test_dataloader = DataLoader(
-        test_dataloader, batch_size=test_batch_size, pin_memory=pin_memory, shuffle=True
+        dataset2, pin_memory=pin_memory, batch_size=test_batch_size, shuffle=True
     )
 
-    t_model = resnet18(weights="ResNet18_Weights.IMAGENET1K_V1").to(device)
-    s_model = torch.load("models/student_model.pt", map_location=device).to(device)
-
-    t_model = torch.nn.DataParallel(t_model)
-    s_model = torch.nn.DataParallel(s_model)
+    t_model = torch.load("models/cifar10_resnet101.pt", map_location=device)
+    s_model = torch.load("models/student_model.pt", map_location=device)
 
     loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.SGD(
         s_model.parameters(), lr=params["lr"], momentum=params["momentum"]
     )
 
-    with open("kd.log", "w", newline="") as fh:
+    with open("logs/kd.log", "w", newline="") as fh:
         writer = csv.writer(fh)
         writer.writerow(
             [
                 "epoch",
-                "test_accuracy",
-                "test_loss",
+                "student_train_accuracy",
+                "student_train_loss",
+                "student_test_accuracy",
+                "student_test_loss",
             ]
         )
 
-    epochs = 10
+    epochs = 200
+
+    t_test_accuracy, t_test_loss = test(test_dataloader, t_model, loss_fn)
+    print(
+        "Teacher model accuracy: ", t_test_accuracy, "Teacher model loss: ", t_test_loss
+    )
     for t in range(epochs):
         if os.path.exists("models/student_model_kd.pt"):
             s_model = torch.load("models/student_model_kd.pt", map_location=device).to(
@@ -344,20 +176,25 @@ def knowledge_dist():
             )
         print(f"Epoch {t+1}\n-------------------------------")
         kd_train(train_dataloader, s_model, t_model, optimizer)
-        test_accuracy, test_loss = test(test_dataloader, s_model, loss_fn)
+        s_train_accuracy, s_train_loss = test(train_dataloader, t_model, loss_fn)
+        s_test_accuracy, s_test_loss = test(test_dataloader, s_model, loss_fn)
+
         print(
-            "Accuracy: {:0.2e}%, Test Loss: {:0.2e}".format(
-                test_accuracy * 100, test_loss
-            )
+            f"Student Train Accuracy: {s_test_accuracy * 100}%, Test Loss: {s_train_loss}"
+        )
+        print(
+            f"Student Test Accuracy: {s_test_accuracy * 100}%, Test Loss: {s_test_loss}"
         )
         torch.save(s_model, "models/student_model_kd.pt")
-        with open("kd.log", "a") as fh:
+        with open("logs/kd.log", "a") as fh:
             writer = csv.writer(fh)
-            writer.writerow([t, test_accuracy, test_loss])
+            writer.writerow(
+                [t, s_train_accuracy, s_train_loss, s_test_accuracy, s_test_loss]
+            )
 
 
 def prune():
-    s_model = resnet18(weights="ResNet18_Weights.IMAGENET1K_V1").to(device)
+    s_model = resnet18().to(device)
 
     config_list = [
         {
@@ -460,9 +297,8 @@ def post_process():
 
 
 if __name__ == "__main__":
-    distributed()
     # prune()
-    # knowledge_dist()
+    knowledge_dist()
     # convert_torch_to_onnx()
     # pre_process()
     # post_process()
