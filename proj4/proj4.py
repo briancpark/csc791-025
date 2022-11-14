@@ -234,7 +234,7 @@ def prune():
 
 
 def convert_torch_to_onnx():
-    x = torch.randn(1, 3, 224, 224)
+    x = torch.randn(1, 3, 32, 32)
     resnet101_model = torch.load("models/cifar10_resnet101.pt", map_location=device)
     resnet18_kd_model = torch.load("models/student_model_kd_1.pt", map_location=device)
 
@@ -262,49 +262,33 @@ def pre_process():
     img_url = "https://s3.amazonaws.com/model-server/inputs/kitten.jpg"
     img_path = download_testdata(img_url, "imagenet_cat.png", module="data")
 
-    # Resize it to 224x224
-    resized_image = Image.open(img_path).resize((224, 224))
-    img_data = np.asarray(resized_image).astype("float32")
+    transform = transforms.Compose(
+            [
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomCrop(32, padding=4),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[n / 255.0 for n in [129.3, 124.1, 112.4]],
+                    std=[n / 255.0 for n in [68.2, 65.4, 70.4]],
+                ),
+            ]
+        )
 
-    # ONNX expects NCHW input, so convert the array
-    img_data = np.transpose(img_data, (2, 0, 1))
+    data = datasets.CIFAR10("data", train=True, transform=transform)
 
-    # Normalize according to ImageNet
-    imagenet_mean = np.array([0.485, 0.456, 0.406])
-    imagenet_stddev = np.array([0.229, 0.224, 0.225])
-    norm_img_data = np.zeros(img_data.shape).astype("float32")
-    for i in range(img_data.shape[0]):
-        norm_img_data[i, :, :] = (
-            img_data[i, :, :] / 255 - imagenet_mean[i]
-        ) / imagenet_stddev[i]
+    test_dataloader = DataLoader(
+        data, batch_size=1
+    )
+    
+    X, y = test_dataloader.__iter__().__next__()
+    X, y = X.numpy(), y.numpy()
+    
+    print(X.shape)
 
-    # Add batch dimension
-    img_data = np.expand_dims(norm_img_data, axis=0)
+    print(y)
 
     # Save to .npz (outputs imagenet_cat.npz)
-    np.savez("imagenet_cat", data=img_data)
-
-
-def post_process():
-
-    # Download a list of labels
-    labels_url = "https://s3.amazonaws.com/onnx-model-zoo/synset.txt"
-    labels_path = download_testdata(labels_url, "synset.txt", module="data")
-
-    with open(labels_path, "r") as f:
-        labels = [l.rstrip() for l in f]
-
-    output_file = "predictions.npz"
-
-    # Open the output and read the output tensor
-    if os.path.exists(output_file):
-        with np.load(output_file) as data:
-            scores = softmax(data["output_0"])
-            scores = np.squeeze(scores)
-            ranks = np.argsort(scores)[::-1]
-
-            for rank in ranks[0:5]:
-                print("class='%s' with probability=%f" % (labels[rank], scores[rank]))
+    np.savez("cifar10", data=X)
 
 
 def plot():
@@ -336,7 +320,6 @@ def plot():
 if __name__ == "__main__":
     # prune()
     # knowledge_dist()
-    convert_torch_to_onnx()
-    # pre_process()
-    # post_process()
+    # convert_torch_to_onnx()
+    pre_process()
     plot()
