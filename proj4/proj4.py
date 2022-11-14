@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader, Subset
 from torchvision import datasets
 from torchvision.transforms import ToTensor
 import torchvision.transforms as transforms
-from torchvision.models import resnet18, resnet152
+from torchvision.models import resnet18
 import os
 import csv
 import sys
@@ -13,6 +13,15 @@ import torch.nn.functional as F
 import torch.onnx
 from nni.compression.pytorch.pruning import *
 from nni.compression.pytorch.speedup import ModelSpeedup
+import matplotlib.pyplot as plt
+import pandas as pd
+from tvm.contrib.download import download_testdata
+from PIL import Image
+import numpy as np
+import os.path
+import numpy as np
+from scipy.special import softmax
+from tvm.contrib.download import download_testdata
 
 device = torch.device(
     "mps"
@@ -36,7 +45,6 @@ params = {
 }
 
 batch_size = 1024
-test_batch_size = 2048
 pin_memory = True
 
 
@@ -139,10 +147,10 @@ def knowledge_dist():
         dataset1, pin_memory=pin_memory, batch_size=batch_size, shuffle=True
     )
     test_dataloader = DataLoader(
-        dataset2, pin_memory=pin_memory, batch_size=test_batch_size, shuffle=True
+        dataset2, pin_memory=pin_memory, batch_size=batch_size, shuffle=True
     )
 
-    temperatures = [1, 5, 10, 15, 20]
+    temperatures = [5, 10, 15, 20]
 
     for kd_T in temperatures:
         t_model = torch.load("models/cifar10_resnet101.pt", map_location=device)
@@ -165,7 +173,7 @@ def knowledge_dist():
                 ]
             )
 
-        epochs = 200
+        epochs = 20
 
         t_train_accuracy, t_train_loss = test(train_dataloader, t_model, loss_fn)
         t_test_accuracy, t_test_loss = test(test_dataloader, t_model, loss_fn)
@@ -227,13 +235,13 @@ def prune():
 
 def convert_torch_to_onnx():
     x = torch.randn(1, 3, 224, 224)
-    resnet18_model = resnet18(weights="ResNet18_Weights.IMAGENET1K_V1")
-    resnet18_kd_model = torch.load("models/student_model_kd.pt").module.to("cpu")
+    resnet101_model = torch.load("models/cifar10_resnet101.pt", map_location=device)
+    resnet18_kd_model = torch.load("models/student_model_kd_1.pt", map_location=device)
 
     torch.onnx.export(
-        resnet18_model,
+        resnet101_model,
         x,
-        "resnet18.onnx",
+        "onnx_models/resnet101.onnx",
         export_params=True,
         input_names=["data"],
         output_names=["output"],
@@ -242,7 +250,7 @@ def convert_torch_to_onnx():
     torch.onnx.export(
         resnet18_kd_model,
         x,
-        "resnet18_kd.onnx",
+        "onnx_models/resnet18_kd.onnx",
         export_params=True,
         input_names=["data"],
         output_names=["output"],
@@ -250,9 +258,6 @@ def convert_torch_to_onnx():
 
 
 def pre_process():
-    from tvm.contrib.download import download_testdata
-    from PIL import Image
-    import numpy as np
 
     img_url = "https://s3.amazonaws.com/model-server/inputs/kitten.jpg"
     img_path = download_testdata(img_url, "imagenet_cat.png", module="data")
@@ -281,12 +286,6 @@ def pre_process():
 
 
 def post_process():
-    import os.path
-    import numpy as np
-
-    from scipy.special import softmax
-
-    from tvm.contrib.download import download_testdata
 
     # Download a list of labels
     labels_url = "https://s3.amazonaws.com/onnx-model-zoo/synset.txt"
@@ -308,9 +307,36 @@ def post_process():
                 print("class='%s' with probability=%f" % (labels[rank], scores[rank]))
 
 
+def plot():
+    temperatures = [1, 5, 10, 15, 20]
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(
+        list(range(20)),
+        [84.822 for _ in range(20)],
+        label="Teacher",
+        linestyle="dashed",
+    )
+    for t in temperatures:
+        df = pd.read_csv("logs/kd_{}.log".format(t))
+        # df["student_train_accuracy","student_train_loss","student_test_accuracy","student_test_loss"]
+        plt.plot(
+            df["epoch"],
+            df["student_train_accuracy"] * 100,
+            label="Temperature " + str(t),
+        )
+    plt.title("Student Train Accuracy and Temperature")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.legend()
+    plt.savefig("figures/kd_training.png")
+    plt.clf()
+
+
 if __name__ == "__main__":
     # prune()
-    knowledge_dist()
-    # convert_torch_to_onnx()
+    # knowledge_dist()
+    convert_torch_to_onnx()
     # pre_process()
     # post_process()
+    plot()
