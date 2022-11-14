@@ -263,26 +263,24 @@ def pre_process():
     img_path = download_testdata(img_url, "imagenet_cat.png", module="data")
 
     transform = transforms.Compose(
-            [
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomCrop(32, padding=4),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[n / 255.0 for n in [129.3, 124.1, 112.4]],
-                    std=[n / 255.0 for n in [68.2, 65.4, 70.4]],
-                ),
-            ]
-        )
+        [
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomCrop(32, padding=4),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[n / 255.0 for n in [129.3, 124.1, 112.4]],
+                std=[n / 255.0 for n in [68.2, 65.4, 70.4]],
+            ),
+        ]
+    )
 
     data = datasets.CIFAR10("data", train=True, transform=transform)
 
-    test_dataloader = DataLoader(
-        data, batch_size=1
-    )
-    
+    test_dataloader = DataLoader(data, batch_size=1)
+
     X, y = test_dataloader.__iter__().__next__()
     X, y = X.numpy(), y.numpy()
-    
+
     print(X.shape)
 
     print(y)
