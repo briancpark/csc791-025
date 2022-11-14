@@ -153,7 +153,7 @@ def knowledge_dist():
             s_model.parameters(), lr=params["lr"], momentum=params["momentum"]
         )
 
-        with open("logs/kd_{kd_T}.log", "w", newline="") as fh:
+        with open(f"logs/kd_{kd_T}.log", "w", newline="") as fh:
             writer = csv.writer(fh)
             writer.writerow(
                 [
