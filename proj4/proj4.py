@@ -8,6 +8,7 @@ from torchvision.models import resnet18
 import os
 import csv
 import sys
+import time
 from tqdm import tqdm
 import torch.nn.functional as F
 import torch.onnx
@@ -257,7 +258,7 @@ def convert_torch_to_onnx():
     )
 
 
-def pre_process():
+def preprocess():
 
     img_url = "https://s3.amazonaws.com/model-server/inputs/kitten.jpg"
     img_path = download_testdata(img_url, "imagenet_cat.png", module="data")
@@ -274,7 +275,7 @@ def pre_process():
         ]
     )
 
-    data = datasets.CIFAR10("data", train=True, transform=transform)
+    data = datasets.CIFAR10("data", train=False, transform=transform)
 
     test_dataloader = DataLoader(data, batch_size=1)
 
@@ -287,6 +288,32 @@ def pre_process():
 
     # Save to .npz (outputs imagenet_cat.npz)
     np.savez("cifar10", data=X)
+
+    _device = torch.device("cpu")
+    t_model = torch.load("models/cifar10_resnet101.pt", map_location=_device)
+    s_model = torch.load("models/student_model.pt", map_location=_device)
+
+    t_times = []
+    s_times = []
+
+    X = torch.randn(1, 3, 32, 32)
+    for _ in range(100):
+        tik = time.perf_counter()
+        t_model(X)
+        tok = time.perf_counter()
+        t_times.append(tok - tik)
+
+    X = torch.randn(2, 3, 32, 32)
+    for _ in range(100):
+        tik = time.perf_counter()
+        s_model(X)
+        tok = time.perf_counter()
+        s_times.append(tok - tik)
+
+    print("Teacher model inference time mean: ", np.mean(t_times) * 1000)
+    print("Student model inference time mean: ", np.mean(s_times) * 1000)
+    print("Teacher model inference time std: ", np.std(t_times) * 1000)
+    print("Student model inference time std: ", np.std(s_times) * 1000)
 
 
 def plot():
@@ -316,27 +343,38 @@ def plot():
 
     mean_times = np.array(
         [
+            12.969129765406251,
             9.1890,
-            2.6268,
             8.8977,
+            5.353794496040791,
+            2.6268,
             2.6364,
         ]
     )
 
     std_times = np.array(
         [
+            1.0149381118637237,
             1.6642,
-            0.3102,
             0.1257,
+            0.5687720631130401,
+            0.3102,
             0.1212,
         ]
     )
 
-    tvm_models = ["ResNet-101 Tuned", "ResNet-18 Tuned", "ResNet-101", "ResNet-18"]
+    tvm_models = [
+        "ResNet-101 PyTorch",
+        "ResNet-101 TVM",
+        "ResNet-101 TVM Tuned",
+        "ResNet-18 KD PyTorch",
+        "ResNet-18 KD TVM",
+        "ResNet-18 KD TVM Tuned",
+    ]
 
     x_pos = np.arange(len(tvm_models))
 
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=(20, 5))
     ax.bar(
         x_pos,
         mean_times,
@@ -346,7 +384,7 @@ def plot():
         ecolor="black",
         capsize=10,
     )
-    ax.set_ylabel("Latency (s)")
+    ax.set_ylabel("Latency (ms)")
     ax.set_xticks(x_pos)
     ax.set_xticklabels(tvm_models)
     ax.set_title(
@@ -373,7 +411,7 @@ if __name__ == "__main__":
     elif sys.argv[1] == "convert":
         convert_torch_to_onnx()
     elif sys.argv[1] == "preprocess":
-        pre_process()
+        preprocess()
     elif sys.argv[1] == "plot":
         plot()
     else:
