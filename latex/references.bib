@@ -53,6 +53,14 @@
 	title        = {CSC 791-025 GitHub Repository},
 	howpublished = {\url{https://github.com/briancpark/csc791-025/tree/main/proj3}}
 }
+@misc{proj4-repo,
+	title        = {CSC 791-025 GitHub Repository},
+	howpublished = {\url{https://github.com/briancpark/csc791-025/tree/main/proj4}}
+}
+@misc{final-repo,
+	title        = {CSC 791-025 GitHub Repository},
+	howpublished = {\url{https://github.com/briancpark/csc791-025/tree/main/final}}
+}
 @software{nni,
 	title        = {{Neural Network Intelligence}},
 	author       = {{Microsoft}},
@@ -76,10 +84,6 @@
 @misc{v100,
 	title        = {NVIDIA V100 Datasheet},
 	howpublished = {\url{https://images.nvidia.com/content/technologies/volta/pdf/volta-v100-datasheet-update-us-1165301-r5.pdf}}
-}
-@misc{torchvision,
-	title        = {Torchvision: Models and pre-trained weights},
-	howpublished = {\url{https://pytorch.org/vision/stable/models.html}}
 }
 @misc{pytorchm1,
 	title        = {Introducing accelerated pytorch training on Mac},
@@ -270,4 +274,115 @@
 	year         = 2013,
 	booktitle    = {ECML PKDD Workshop: Languages for Data Mining and Machine Learning},
 	pages        = {108--122}
+}
+@misc{distillation,
+	title        = {Distilling the Knowledge in a Neural Network},
+	author       = {Hinton, Geoffrey and Vinyals, Oriol and Dean, Jeff},
+	year         = 2015,
+	publisher    = {arXiv},
+	doi          = {10.48550/ARXIV.1503.02531},
+	url          = {https://arxiv.org/abs/1503.02531},
+	copyright    = {arXiv.org perpetual, non-exclusive license},
+	keywords     = {Machine Learning (stat.ML), Machine Learning (cs.LG), Neural and Evolutionary Computing (cs.NE), FOS: Computer and information sciences, FOS: Computer and information sciences}
+}
+@inproceedings{tvm,
+	title        = {TVM: An Automated End-to-End Optimizing Compiler for Deep Learning},
+	author       = {Chen, Tianqi and Moreau, Thierry and Jiang, Ziheng and Zheng, Lianmin and Yan, Eddie and Cowan, Meghan and Shen, Haichen and Wang, Leyuan and Hu, Yuwei and Ceze, Luis and Guestrin, Carlos and Krishnamurthy, Arvind},
+	year         = 2018,
+	booktitle    = {Proceedings of the 13th USENIX Conference on Operating Systems Design and Implementation},
+	location     = {Carlsbad, CA, USA},
+	publisher    = {USENIX Association},
+	address      = {USA},
+	series       = {OSDI'18},
+	pages        = {579–594},
+	isbn         = 9781931971478,
+	abstract     = {There is an increasing need to bring machine learning to a wide diversity of hardware devices. Current frameworks rely on vendor-specific operator libraries and optimize for a narrow range of server-class GPUs. Deploying workloads to new platforms - such as mobile phones, embedded devices, and accelerators (e.g., FPGAs, ASICs) - requires significant manual effort. We propose TVM, a compiler that exposes graph-level and operator-level optimizations to provide performance portability to deep learning workloads across diverse hardware back-ends. TVM solves optimization challenges specific to deep learning, such as high-level operator fusion, mapping to arbitrary hardware primitives, and memory latency hiding. It also automates optimization of low-level programs to hardware characteristics by employing a novel, learning-based cost modeling method for rapid exploration of code optimizations. Experimental results show that TVM delivers performance across hardware back-ends that are competitive with state-of-the-art, hand-tuned libraries for low-power CPU, mobile GPU, and server-class GPUs. We also demonstrate TVM's ability to target new accelerator back-ends, such as the FPGA-based generic deep learning accelerator. The system is open sourced and in production use inside several major companies.},
+	numpages     = 16
+}
+@misc{densenet,
+	title        = {Densely Connected Convolutional Networks},
+	author       = {Huang, Gao and Liu, Zhuang and van der Maaten, Laurens and Weinberger, Kilian Q.},
+	year         = 2016,
+	publisher    = {arXiv},
+	doi          = {10.48550/ARXIV.1608.06993},
+	url          = {https://arxiv.org/abs/1608.06993},
+	copyright    = {arXiv.org perpetual, non-exclusive license},
+	keywords     = {Computer Vision and Pattern Recognition (cs.CV), Machine Learning (cs.LG), FOS: Computer and information sciences, FOS: Computer and information sciences}
+}
+@article{imagenet,
+	title        = {{ImageNet Large Scale Visual Recognition Challenge}},
+	author       = {Olga Russakovsky and Jia Deng and Hao Su and Jonathan Krause and Sanjeev Satheesh and Sean Ma and Zhiheng Huang and Andrej Karpathy and Aditya Khosla and Michael Bernstein and Alexander C. Berg and Li Fei-Fei},
+	year         = 2015,
+	journal      = {International Journal of Computer Vision (IJCV)},
+	volume       = 115,
+	number       = 3,
+	pages        = {211--252},
+	doi          = {10.1007/s11263-015-0816-y}
+}
+@inproceedings{pytorch,
+	title        = {PyTorch: An Imperative Style, High-Performance Deep Learning Library},
+	author       = {Paszke, Adam and Gross, Sam and Massa, Francisco and Lerer, Adam and Bradbury, James and Chanan, Gregory and Killeen, Trevor and Lin, Zeming and Gimelshein, Natalia and Antiga, Luca and Desmaison, Alban and Kopf, Andreas and Yang, Edward and DeVito, Zachary and Raison, Martin and Tejani, Alykhan and Chilamkurthy, Sasank and Steiner, Benoit and Fang, Lu and Bai, Junjie and Chintala, Soumith},
+	year         = 2019,
+	booktitle    = {Advances in Neural Information Processing Systems},
+	publisher    = {Curran Associates, Inc.},
+	volume       = 32,
+	pages        = {},
+	url          = {https://proceedings.neurips.cc/paper/2019/file/bdbca288fee7f92f2bfa9f7012727740-Paper.pdf},
+	editor       = {H. Wallach and H. Larochelle and A. Beygelzimer and F. d\textquotesingle Alch\'{e}-Buc and E. Fox and R. Garnett}
+}
+@inproceedings{torchvision,
+	title        = {Torchvision the Machine-Vision Package of Torch},
+	author       = {Marcel, S\'{e}bastien and Rodriguez, Yann},
+	year         = 2010,
+	booktitle    = {Proceedings of the 18th ACM International Conference on Multimedia},
+	location     = {Firenze, Italy},
+	publisher    = {Association for Computing Machinery},
+	address      = {New York, NY, USA},
+	series       = {MM '10},
+	pages        = {1485–1488},
+	doi          = {10.1145/1873951.1874254},
+	isbn         = 9781605589336,
+	url          = {https://doi.org/10.1145/1873951.1874254},
+	abstract     = {This paper presents Torchvision an open source machine vision package for Torch. Torch is a machine learning library providing a series of the state-of-the-art algorithms such as Neural Networks, Support Vector Machines, Gaussian Mixture Models, Hidden Markov Models and many others. Torchvision provides additional functionalities to manipulate and process images with standard image processing algorithms. Hence, the resulting images can be used directly with the Torch machine learning algorithms as Torchvision is fully integrated with Torch. Both Torch and Torchvision are written in C++ language and are publicly available under the Free-BSD License.},
+	numpages     = 4,
+	keywords     = {vision, pattern recognition, open source, machine learning, face detection and recognition}
+}
+@article{imagenet-quick,
+	title        = {100-epoch ImageNet Training with AlexNet in 24 Minutes},
+	author       = {Yang You and Zhao Zhang and Cho{-}Jui Hsieh and James Demmel},
+	year         = 2017,
+	journal      = {CoRR},
+	volume       = {abs/1709.05011},
+	url          = {http://arxiv.org/abs/1709.05011},
+	eprinttype   = {arXiv},
+	eprint       = {1709.05011},
+	timestamp    = {Thu, 04 Apr 2019 12:51:57 +0200},
+	biburl       = {https://dblp.org/rec/journals/corr/abs-1709-05011.bib},
+	bibsource    = {dblp computer science bibliography, https://dblp.org}
+}
+@article{xgboost,
+	title        = {XGBoost: {A} Scalable Tree Boosting System},
+	author       = {Tianqi Chen and Carlos Guestrin},
+	year         = 2016,
+	journal      = {CoRR},
+	volume       = {abs/1603.02754},
+	url          = {http://arxiv.org/abs/1603.02754},
+	eprinttype   = {arXiv},
+	eprint       = {1603.02754},
+	timestamp    = {Mon, 13 Aug 2018 16:47:00 +0200},
+	biburl       = {https://dblp.org/rec/journals/corr/ChenG16.bib},
+	bibsource    = {dblp computer science bibliography, https://dblp.org}
+}
+@article{distillation-works,
+	title        = {Does Knowledge Distillation Really Work?},
+	author       = {Samuel Stanton and Pavel Izmailov and Polina Kirichenko and Alexander A. Alemi and Andrew Gordon Wilson},
+	year         = 2021,
+	journal      = {CoRR},
+	volume       = {abs/2106.05945},
+	url          = {https://arxiv.org/abs/2106.05945},
+	eprinttype   = {arXiv},
+	eprint       = {2106.05945},
+	timestamp    = {Tue, 15 Jun 2021 16:35:15 +0200},
+	biburl       = {https://dblp.org/rec/journals/corr/abs-2106-05945.bib},
+	bibsource    = {dblp computer science bibliography, https://dblp.org}
 }
