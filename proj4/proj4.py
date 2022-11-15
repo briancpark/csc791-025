@@ -277,7 +277,7 @@ def preprocess():
 
     data = datasets.CIFAR10("data", train=False, transform=transform)
 
-    test_dataloader = DataLoader(data, batch_size=2)
+    test_dataloader = DataLoader(data, batch_size=1)
 
     X, y = test_dataloader.__iter__().__next__()
     X, y = X.numpy(), y.numpy()
@@ -289,7 +289,6 @@ def preprocess():
     # Save to .npz (outputs imagenet_cat.npz)
     np.savez("cifar10", data=X)
 
-    X, _ = test_dataloader.__iter__().__next__()
     _device = torch.device("cpu")
     t_model = torch.load("models/cifar10_resnet101.pt", map_location=_device)
     s_model = torch.load("models/student_model.pt", map_location=_device)
@@ -297,12 +296,14 @@ def preprocess():
     t_times = []
     s_times = []
 
+    X = torch.randn(1, 3, 32, 32)
     for _ in range(100):
         tik = time.perf_counter()
         t_model(X)
         tok = time.perf_counter()
         t_times.append(tok - tik)
 
+    X = torch.randn(2, 3, 32, 32)
     for _ in range(100):
         tik = time.perf_counter()
         s_model(X)
@@ -342,10 +343,10 @@ def plot():
 
     mean_times = np.array(
         [
-            22.985358741134405,
+            12.969129765406251,
             9.1890,
             8.8977,
-            5.432290087919682,
+            5.353794496040791,
             2.6268,
             2.6364,
         ]
@@ -353,10 +354,10 @@ def plot():
 
     std_times = np.array(
         [
-            2.0452267499313423,
+            1.0149381118637237,
             1.6642,
             0.1257,
-            0.7075658821824135,
+            0.5687720631130401,
             0.3102,
             0.1212,
         ]
