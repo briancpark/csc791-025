@@ -11,3 +11,7 @@ matplotlib
 nvidia-tensorrt
 onnx
 pycuda
+apache-tvm
+tqdm
+onnx
+apache-tvm-cu116 -f https://tlcpack.ai/wheels

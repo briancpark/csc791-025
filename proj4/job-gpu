@@ -1,0 +1,42 @@
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH -n 1
+#SBATCH -p GPU-shared
+#SBATCH -t 48:00:00
+#SBATCH --gres=gpu:1
+
+nvidia-smi
+source ~/.bashrc
+conda activate csc791
+cd /jet/home/bpark1/csc791-025/proj4
+python3 proj4.py
+export TVM_NUM_THREADS=8
+
+mkdir tvm_models
+mkdir onnx_models
+
+tvmc compile --target "llvm" --input-shapes "data:[1,3,32,32]" --output tvm_models/resnet101-tvm.tar onnx_models/resnet101.onnx
+tvmc compile --target "llvm" --input-shapes "data:[1,3,32,32]" --output tvm_models/resnet18-kd-tvm.tar onnx_models/resnet18_kd.onnx
+
+mkdir tvm_models/resnet101
+tar -xvf tvm_models/resnet101-tvm.tar -C tvm_models/resnet101
+
+mkdir tvm_models/resnet18-kd
+tar -xvf tvm_models/resnet18-kd-tvm.tar -C tvm_models/resnet18-kd
+
+tvmc tune --target "llvm -mcpu=cascadelake" --output tvm_models/resnet101-tune-records.json onnx_models/resnet101.onnx
+tvmc tune --target "llvm -mcpu=cascadelake" --output tvm_models/resnet18-kd-tune-records.json onnx_models/resnet18_kd.onnx
+
+tvmc compile --target "llvm" --input-shapes "data:[1,3,32,32]" --tuning-records tvm_models/resnet101-tune-records.json --output tvm_models/resnet101-tvm_autotuned.tar onnx_models/resnet101.onnx
+tvmc compile --target "llvm" --input-shapes "data:[1,3,32,32]" --tuning-records tvm_models/resnet18-kd-tune-records.json --output tvm_models/resnet18-kd-tvm_autotuned.tar onnx_models/resnet18_kd.onnx
+
+mkdir tvm_models/resnet101_autotuned
+tar -xvf tvm_models/resnet101-tvm_autotuned.tar  -C tvm_models/resnet101_autotuned
+
+mkdir tvm_models/resnet18-kd
+tar -xvf tvm_models/resnet18-kd-tvm_autotuned.tar -C tvm_models/resnet18-kd_autotuned
+
+tvmc run --inputs cifar10.npz --print-time --repeat 100 --output tvm_models/resnet101-predictions.npz tvm_models/resnet101-tvm_autotuned.tar
+tvmc run --inputs cifar10.npz --print-time --repeat 100 --output tvm_models/resnet18-kd-predictions.npz tvm_models/resnet18-kd-tvm_autotuned.tar
+tvmc run --inputs cifar10.npz --print-time --repeat 100 --output tvm_models/resnet101-predictions.npz tvm_models/resnet101-tvm.tar
+tvmc run --inputs cifar10.npz --print-time --repeat 100 --output tvm_models/resnet18-kd-predictions.npz tvm_models/resnet18-kd-tvm.tar
