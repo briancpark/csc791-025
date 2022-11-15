@@ -314,10 +314,68 @@ def plot():
     plt.savefig("figures/kd_training.png")
     plt.clf()
 
+    mean_times = np.array(
+        [
+            9.1890,
+            2.6268,
+            8.8977,
+            2.6364,
+        ]
+    )
+
+    std_times = np.array(
+        [
+            1.6642,
+            0.3102,
+            0.1257,
+            0.1212,
+        ]
+    )
+
+    tvm_models = ["ResNet-101 Tuned", "ResNet-18 Tuned", "ResNet-101", "ResNet-18"]
+
+    x_pos = np.arange(len(tvm_models))
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.bar(
+        x_pos,
+        mean_times,
+        yerr=std_times,
+        align="center",
+        alpha=0.5,
+        ecolor="black",
+        capsize=10,
+    )
+    ax.set_ylabel("Latency (s)")
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(tvm_models)
+    ax.set_title(
+        "TVM Compiled Inference Latency on Intel(R) Xeon(R) Gold 6248 CPU @ 2.50GHz CPU"
+    )
+
+    # Save the figure and show
+    plt.tight_layout()
+    plt.savefig("figures/tvm_benchmarks.png")
+    plt.clf()
+
 
 if __name__ == "__main__":
-    # prune()
-    # knowledge_dist()
-    # convert_torch_to_onnx()
-    pre_process()
-    plot()
+    if len(sys.argv) == 1:
+        prune()
+        knowledge_dist()
+        convert_torch_to_onnx()
+        pre_process()
+        plot()
+    elif sys.argv[1] == "prune":
+        prune()
+    elif sys.argv[1] == "distillation":
+        knowledge_dist()
+    elif sys.argv[1] == "convert":
+        convert_torch_to_onnx()
+    elif sys.argv[1] == "preprocess":
+        pre_process()
+    elif sys.argv[1] == "plot":
+        plot()
+    else:
+        print("Invalid argument")
+        print("Example usage: python3 proj4.py distillation")
