@@ -1,11 +1,10 @@
 from __future__ import print_function
 import argparse
 from math import log10
-import torch
-import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
-from os.path import exists, join, basename
+from os.path import exists, basename
 from os import makedirs, remove
 from six.moves import urllib
 import tarfile
@@ -16,34 +15,8 @@ from os.path import join
 from PIL import Image
 import torch
 import torch.nn as nn
-import torch.nn.init as init
 
-
-class Net(nn.Module):
-    def __init__(self, upscale_factor):
-        super(Net, self).__init__()
-
-        self.relu = nn.ReLU()
-        self.conv1 = nn.Conv2d(1, 64, (5, 5), (1, 1), (2, 2))
-        self.conv2 = nn.Conv2d(64, 64, (3, 3), (1, 1), (1, 1))
-        self.conv3 = nn.Conv2d(64, 32, (3, 3), (1, 1), (1, 1))
-        self.conv4 = nn.Conv2d(32, upscale_factor**2, (3, 3), (1, 1), (1, 1))
-        self.pixel_shuffle = nn.PixelShuffle(upscale_factor)
-
-        self._initialize_weights()
-
-    def forward(self, x):
-        x = self.relu(self.conv1(x))
-        x = self.relu(self.conv2(x))
-        x = self.relu(self.conv3(x))
-        x = self.pixel_shuffle(self.conv4(x))
-        return x
-
-    def _initialize_weights(self):
-        init.orthogonal_(self.conv1.weight, init.calculate_gain("relu"))
-        init.orthogonal_(self.conv2.weight, init.calculate_gain("relu"))
-        init.orthogonal_(self.conv3.weight, init.calculate_gain("relu"))
-        init.orthogonal_(self.conv4.weight)
+from model import SuperResolutionTwitter
 
 
 def is_image_file(filename):
@@ -192,6 +165,7 @@ def checkpoint(epoch):
     model_out_path = "models/model_epoch_{}.pth".format(epoch)
     torch.save(model, model_out_path)
     print("Checkpoint saved to {}".format(model_out_path))
+    pass
 
 
 if __name__ == "__main__":
@@ -202,7 +176,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--batchSize", type=int, default=64, help="training batch size")
     parser.add_argument(
-        "--testBatchSize", type=int, default=128, help="testing batch size"
+        "--testBatchSize", type=int, default=32, help="testing batch size"
     )
     parser.add_argument(
         "--nEpochs", type=int, default=100, help="number of epochs to train for"
@@ -210,39 +184,25 @@ if __name__ == "__main__":
     parser.add_argument(
         "--lr", type=float, default=0.01, help="Learning Rate. Default=0.01"
     )
-    parser.add_argument("--cuda", action="store_true", help="use cuda?")
-    parser.add_argument(
-        "--mps", action="store_true", default=False, help="enables macOS GPU training"
-    )
     parser.add_argument(
         "--threads",
         type=int,
-        default=16,
+        default=8,
         help="number of threads for data loader to use",
     )
     parser.add_argument(
-        "--seed", type=int, default=1337, help="random seed to use. Default=123"
+        "--seed", type=int, default=1337, help="random seed to use. Default=1337"
     )
     opt = parser.parse_args()
 
-    print(opt)
+    device = torch.device(
+        "mps"
+        if torch.backends.mps.is_available()
+        else "cuda"
+        if torch.cuda.is_available()
+        else "cpu"
+    )
 
-    if opt.cuda and not torch.cuda.is_available():
-        raise Exception("No GPU found, please run without --cuda")
-    if not opt.mps and torch.backends.mps.is_available():
-        raise Exception("Found mps device, please run with --mps to enable macOS GPU")
-
-    torch.manual_seed(opt.seed)
-    use_mps = opt.mps and torch.backends.mps.is_available()
-
-    if opt.cuda:
-        device = torch.device("cuda")
-    elif use_mps:
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
-
-    print("===> Loading datasets")
     train_set = get_training_set(opt.upscale_factor)
     test_set = get_test_set(opt.upscale_factor)
     training_data_loader = DataLoader(
@@ -258,16 +218,15 @@ if __name__ == "__main__":
         shuffle=False,
     )
 
-    print("===> Building model")
-    model = Net(upscale_factor=opt.upscale_factor).to(device)
+    model = SuperResolutionTwitter(upscale_factor=opt.upscale_factor).to(device)
     criterion = nn.MSELoss()
 
     optimizer = optim.Adam(model.parameters(), lr=opt.lr)
-    scheduler = optim.lr_scheduler.StepLR(
-        optimizer, step_size=50, gamma=0.1
-    )  # TODO: (bcp) Add scheduler.
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
+    0.0001
 
     for epoch in range(1, opt.nEpochs + 1):
         train(epoch)
         test()
         checkpoint(epoch)
+        scheduler.step()
