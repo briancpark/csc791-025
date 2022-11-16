@@ -235,7 +235,7 @@ def training():
         train(training_data_loader, model, criterion, optimizer, epoch)
         test(training_data_loader, model, criterion)
         test(testing_data_loader, model, criterion)
-        checkpoint(epoch)
+        checkpoint(epoch, model)
         scheduler.step()
 
 
