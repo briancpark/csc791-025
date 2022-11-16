@@ -16,6 +16,7 @@ from PIL import Image
 from torchvision.transforms import ToTensor
 import os
 import numpy as np
+import sys
 
 from model import SuperResolutionTwitter
 
@@ -240,5 +241,13 @@ def training():
 
 
 if __name__ == "__main__":
-    # training()
-    inference()
+    if len(sys.argv) == 1:
+        training()
+        inference()
+    elif sys.argv[1] == "training":
+        training()
+    elif sys.argv[1] == "inference":
+        inference()
+    else:
+        print("Invalid argument")
+        print("Example usage: python3 final.py training")
