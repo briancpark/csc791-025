@@ -24,7 +24,7 @@ from model import SuperResolutionTwitter
 
 ### Inference Variables
 input_image = "data/BSDS300/images/test/16077.jpg"
-model = "models/model_epoch_48.pth"
+model_path = "models/model_epoch_48.pth"
 output_filename = "out.png"
 
 ### Training Variables
@@ -198,7 +198,7 @@ def inference():
     img = Image.open(input_image).convert("YCbCr")
     y, cb, cr = img.split()
 
-    model = torch.load(model)
+    model = torch.load(model_path)
     img_to_tensor = ToTensor()
     input = img_to_tensor(y).view(1, -1, y.size[1], y.size[0])
 
@@ -262,7 +262,6 @@ def training():
                 writer.writerow([epoch, train_psnr, test_psnr, train_loss])
 
 
-
 def visualize():
     model = SuperResolutionTwitter(upscale_factor=3)
     input = torch.randn(1, 1, 300, 300)
@@ -272,8 +271,10 @@ def visualize():
         f"figures/{model.__class__.__name__}", format="png"
     )
 
+
 def prune():
     pass
+
 
 def benchmark():
     train_set = get_training_set(upscale_factor)
@@ -286,7 +287,7 @@ def benchmark():
         shuffle=False,
     )
 
-    model = torch.load("models/model_epoch_48.pth", map_location=device)
+    model = torch.load(model_path, map_location=device)
 
     inference_times = []
 
@@ -302,6 +303,21 @@ def benchmark():
     print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
 
 
+def convert_to_onnx():
+    if not os.path.exists("onnx_models"):
+        os.mkdir("onnx_models")
+
+    model = torch.load(model_path).cpu()
+    x = torch.randn(1, 1, 300, 300)
+    torch.onnx.export(
+        model,
+        x,
+        f"onnx_models/{model.__class__.__name__}.onnx",
+        do_constant_folding=True,
+        input_names=["input"],
+        output_names=["output"],
+        opset_version=11,  # XGen supports 11 or 9
+    )
 
 
 if __name__ == "__main__":
@@ -321,6 +337,8 @@ if __name__ == "__main__":
         prune()
     elif sys.argv[1] == "benchmark":
         benchmark()
+    elif sys.argv[1] == "onnx":
+        convert_to_onnx()
     else:
         print("Invalid argument")
         print("Example usage: python3 final.py training")
