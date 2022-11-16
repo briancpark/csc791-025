@@ -285,9 +285,15 @@ def benchmark():
     train_set = get_training_set(upscale_factor)
     test_set = get_test_set(upscale_factor)
 
+    training_data_loader = DataLoader(
+        dataset=train_set,
+        batch_size=1,
+        shuffle=False,
+    )
+
     testing_data_loader = DataLoader(
         dataset=test_set,
-        batch_size=test_batch_size,
+        batch_size=1,
         shuffle=False,
     )
 
@@ -299,23 +305,25 @@ def benchmark():
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
 
-        for data, _ in testing_data_loader:
-            data = data.to(device)
+        for data_loader in [training_data_loader, testing_data_loader]:
+            for data, _ in testing_data_loader:
+                data = data.to(device)
 
-            start.record()
-            _ = model(data)
-            end.record()
+                start.record()
+                _ = model(data)
+                end.record()
 
-            torch.cuda.synchronize()
+                torch.cuda.synchronize()
 
-            inference_times.append(start.elapsed_time(end) / 1000)
+                inference_times.append(start.elapsed_time(end) / 1000)
     else:
-        for data, _ in testing_data_loader:
-            data = data.to(device)
+        for data_loader in [training_data_loader, testing_data_loader]:
+            for data, _ in testing_data_loader:
+                data = data.to(device)
 
-            tik = time.perf_counter()
-            _ = model(data)
-            tok = time.perf_counter()
+                tik = time.perf_counter()
+                _ = model(data)
+                tok = time.perf_counter()
 
             inference_times.append(tok - tik)
 
