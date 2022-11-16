@@ -165,7 +165,7 @@ def test(data_loader, model, criterion):
     print("===> Avg. PSNR: {:.4f} dB".format(avg_psnr / len(data_loader)))
 
 
-def checkpoint(epoch):
+def checkpoint(epoch, model):
     model_out_path = "models/model_epoch_{}.pth".format(epoch)
     torch.save(model, model_out_path)
     print("Checkpoint saved to {}".format(model_out_path))
