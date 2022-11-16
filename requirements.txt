@@ -8,10 +8,11 @@ black
 numpy
 pandas
 matplotlib
-nvidia-tensorrt
 onnx
-pycuda
 apache-tvm
 tqdm
 onnx
+nvidia-pyindex
+nvidia-tensorrt
+pycuda
 apache-tvm-cu116 -f https://tlcpack.ai/wheels

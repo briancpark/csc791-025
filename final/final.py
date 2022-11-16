@@ -31,8 +31,8 @@ output_filename = "out.png"
 upscale_factor = 3
 batch_size = 64
 test_batch_size = 32
-epochs = 100
-lr = 0.01
+epochs = 1000
+lr = 0.001
 logging = True
 
 device = torch.device(
@@ -301,10 +301,6 @@ def quantization():
         'quant_types': ['output'],
         'quant_bits': {'output': 8},
         'op_types': ['ReLU']
-    }, {
-        'quant_types': ['input', 'weight'],
-        'quant_bits': {'input': 8, 'weight': 8},
-        'op_names': ['fc1', 'fc2']
     }]
 
 
@@ -318,7 +314,7 @@ def quantization():
             writer = csv.writer(fh)
             writer.writerow(["epoch", "train_psnr", "test_psnr", "train_loss"])
 
-    for epoch in range(1, epochs + 1):
+    for epoch in range(1, 3 + 1):
         train_loss = train(training_data_loader, model, criterion, optimizer, epoch)
         train_psnr = test(training_data_loader, model, criterion)
         test_psnr = test(testing_data_loader, model, criterion)
@@ -330,6 +326,18 @@ def quantization():
                 writer = csv.writer(fh)
                 writer.writerow([epoch, train_psnr, test_psnr, train_loss])
 
+    model_path = "logs/mnist_model.pth"
+    calibration_path = "logs/mnist_calibration.pth"
+    calibration_config = quantizer.export_model(model_path, calibration_path)
+
+    print("calibration_config: ", calibration_config)
+    
+    from nni.compression.pytorch.quantization_speedup import ModelSpeedupTensorRT
+    input_shape = (32, 1, 28, 28)
+    engine = ModelSpeedupTensorRT(model, input_shape, config=calibration_config, batchsize=32)
+    engine.compress()
+    test_trt(engine)
+    
 
 def prune():
     pass
