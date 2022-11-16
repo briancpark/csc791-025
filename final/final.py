@@ -270,6 +270,66 @@ def visualize():
         f"figures/{model.__class__.__name__}", format="png"
     )
 
+def quantization():
+    from nni.algorithms.compression.pytorch.quantization import QAT_Quantizer
+
+    train_set = get_training_set(upscale_factor)
+    test_set = get_test_set(upscale_factor)
+
+    training_data_loader = DataLoader(
+        dataset=train_set,
+        batch_size=batch_size,
+        shuffle=True,
+    )
+    testing_data_loader = DataLoader(
+        dataset=test_set,
+        batch_size=test_batch_size,
+        shuffle=False,
+    )
+
+    model = SuperResolutionTwitter(upscale_factor=3).to(device)
+
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
+
+    config_list = [{
+        'quant_types': ['input', 'weight'],
+        'quant_bits': {'input': 8, 'weight': 8},
+        'op_types': ['Conv2d']
+    }, {
+        'quant_types': ['output'],
+        'quant_bits': {'output': 8},
+        'op_types': ['ReLU']
+    }, {
+        'quant_types': ['input', 'weight'],
+        'quant_bits': {'input': 8, 'weight': 8},
+        'op_names': ['fc1', 'fc2']
+    }]
+
+
+    dummy_input = torch.rand(32, 1, 28, 28).to(device)
+    quantizer = QAT_Quantizer(model, config_list, optimizer, dummy_input)
+    quantizer.compress()
+
+    # Initialize logging
+    if logging:
+        with open(f"logs/{model.__class__.__name__}.csv", "w", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(["epoch", "train_psnr", "test_psnr", "train_loss"])
+
+    for epoch in range(1, epochs + 1):
+        train_loss = train(training_data_loader, model, criterion, optimizer, epoch)
+        train_psnr = test(training_data_loader, model, criterion)
+        test_psnr = test(testing_data_loader, model, criterion)
+        checkpoint(epoch, model)
+        scheduler.step()
+
+        if logging:
+            with open(f"logs/{model.__class__.__name__}.csv", "a") as fh:
+                writer = csv.writer(fh)
+                writer.writerow([epoch, train_psnr, test_psnr, train_loss])
+
 
 def prune():
     pass
@@ -363,6 +423,8 @@ if __name__ == "__main__":
         visualize()
     elif sys.argv[1] == "prune":
         prune()
+    elif sys.argv[1] == "quantization":
+        quantization()
     elif sys.argv[1] == "benchmark":
         benchmark()
     elif sys.argv[1] == "onnx":
