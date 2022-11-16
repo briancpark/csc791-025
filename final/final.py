@@ -44,6 +44,8 @@ device = torch.device(
     else "cpu"
 )
 
+print("Using device:", device.type.upper())
+
 if not os.path.exists("logs"):
     os.mkdir("logs")
 
