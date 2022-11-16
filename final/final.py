@@ -18,7 +18,7 @@ import os
 import numpy as np
 import sys
 import csv
-
+from torchviz import make_dot
 from model import SuperResolutionTwitter
 
 device = torch.device(
@@ -263,6 +263,16 @@ def prune():
     pass
 
 
+def visualize():
+    model = SuperResolutionTwitter(upscale_factor=3)
+    input = torch.randn(1, 1, 300, 300)
+    output = model(input)
+
+    make_dot(output, params=dict(list(model.named_parameters()))).render(
+        f"figures/{model.__class__.__name__}", format="png"
+    )
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 1:
         training()
@@ -271,6 +281,8 @@ if __name__ == "__main__":
         training()
     elif sys.argv[1] == "inference":
         inference()
+    elif sys.argv[1] == "visualize":
+        visualize()
     elif sys.argv[1] == "prune":
         prune()
     else:
