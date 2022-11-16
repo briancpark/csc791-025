@@ -18,8 +18,23 @@ import os
 import numpy as np
 import sys
 import csv
+import time
 from torchviz import make_dot
 from model import SuperResolutionTwitter
+
+### Inference Variables
+input_image = "data/BSDS300/images/test/16077.jpg"
+model = "models/model_epoch_48.pth"
+output_filename = "out.png"
+
+### Training Variables
+upscale_factor = 3
+threads = 8
+batch_size = 64
+test_batch_size = 32
+epochs = 100
+lr = 0.01
+logging = True
 
 device = torch.device(
     "mps"
@@ -180,10 +195,6 @@ def checkpoint(epoch, model):
 
 
 def inference():
-    input_image = "data/BSDS300/images/test/16077.jpg"
-    model = "models/model_epoch_48.pth"
-    output_filename = "out.png"
-
     img = Image.open(input_image).convert("YCbCr")
     y, cb, cr = img.split()
 
@@ -210,14 +221,6 @@ def inference():
 
 
 def training():
-    upscale_factor = 3
-    threads = 8
-    batch_size = 64
-    test_batch_size = 32
-    epochs = 100
-    lr = 0.01
-    logging = True
-
     train_set = get_training_set(upscale_factor)
     test_set = get_test_set(upscale_factor)
 
@@ -259,9 +262,6 @@ def training():
                 writer.writerow([epoch, train_psnr, test_psnr, train_loss])
 
 
-def prune():
-    pass
-
 
 def visualize():
     model = SuperResolutionTwitter(upscale_factor=3)
@@ -272,11 +272,45 @@ def visualize():
         f"figures/{model.__class__.__name__}", format="png"
     )
 
+def prune():
+    pass
+
+def benchmark():
+    train_set = get_training_set(upscale_factor)
+    test_set = get_test_set(upscale_factor)
+
+    testing_data_loader = DataLoader(
+        dataset=test_set,
+        num_workers=threads,
+        batch_size=test_batch_size,
+        shuffle=False,
+    )
+
+    model = torch.load("models/model_epoch_48.pth", map_location=device)
+
+    inference_times = []
+
+    for data, _ in testing_data_loader:
+        data = data.to(device)
+        tik = time.perf_counter()
+        _ = model(data)
+        tok = time.perf_counter()
+
+        inference_times.append(tok - tik)
+
+    print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
+    print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
+
+
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
         training()
         inference()
+        visualize()
+        prune()
+        benchmark()
     elif sys.argv[1] == "training":
         training()
     elif sys.argv[1] == "inference":
@@ -285,6 +319,8 @@ if __name__ == "__main__":
         visualize()
     elif sys.argv[1] == "prune":
         prune()
+    elif sys.argv[1] == "benchmark":
+        benchmark()
     else:
         print("Invalid argument")
         print("Example usage: python3 final.py training")
