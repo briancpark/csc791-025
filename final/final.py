@@ -17,6 +17,7 @@ from torchvision.transforms import ToTensor
 import os
 import numpy as np
 import sys
+import csv
 
 from model import SuperResolutionTwitter
 
@@ -27,6 +28,9 @@ device = torch.device(
     if torch.cuda.is_available()
     else "cpu"
 )
+
+if not os.path.exists("logs"):
+    os.mkdir("logs")
 
 
 def is_image_file(filename):
@@ -151,6 +155,8 @@ def train(data_loader, model, criterion, optimizer, epoch):
         )
     )
 
+    return epoch_loss / len(data_loader)
+
 
 def test(data_loader, model, criterion):
     avg_psnr = 0
@@ -163,6 +169,8 @@ def test(data_loader, model, criterion):
             psnr = 10 * log10(1 / mse.item())
             avg_psnr += psnr
     print("===> Avg. PSNR: {:.4f} dB".format(avg_psnr / len(data_loader)))
+
+    return avg_psnr / len(data_loader)
 
 
 def checkpoint(epoch, model):
@@ -203,11 +211,12 @@ def inference():
 
 def training():
     upscale_factor = 3
-    threads = os.cpu_count()
+    threads = 8
     batch_size = 64
     test_batch_size = 32
     epochs = 100
     lr = 0.01
+    logging = True
 
     train_set = get_training_set(upscale_factor)
     test_set = get_test_set(upscale_factor)
@@ -231,12 +240,27 @@ def training():
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 
+    # Initialize logging
+    if logging:
+        with open(f"logs/{model.__class__.__name__ }.csv", "w", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(["epoch", "train_psnr", "test_psnr", "train_loss"])
+
     for epoch in range(1, epochs + 1):
-        train(training_data_loader, model, criterion, optimizer, epoch)
-        test(training_data_loader, model, criterion)
-        test(testing_data_loader, model, criterion)
+        train_loss = train(training_data_loader, model, criterion, optimizer, epoch)
+        train_psnr = test(training_data_loader, model, criterion)
+        test_psnr = test(testing_data_loader, model, criterion)
         checkpoint(epoch, model)
         scheduler.step()
+
+        if logging:
+            with open(f"logs/{model.__class__.__name__ }.csv", "a") as fh:
+                writer = csv.writer(fh)
+                writer.writerow([epoch, train_psnr, test_psnr, train_loss])
+
+
+def prune():
+    pass
 
 
 if __name__ == "__main__":
@@ -247,6 +271,8 @@ if __name__ == "__main__":
         training()
     elif sys.argv[1] == "inference":
         inference()
+    elif sys.argv[1] == "prune":
+        prune()
     else:
         print("Invalid argument")
         print("Example usage: python3 final.py training")
