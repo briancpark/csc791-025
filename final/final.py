@@ -29,7 +29,6 @@ output_filename = "out.png"
 
 ### Training Variables
 upscale_factor = 3
-threads = 8
 batch_size = 64
 test_batch_size = 32
 epochs = 100
@@ -228,13 +227,11 @@ def training():
 
     training_data_loader = DataLoader(
         dataset=train_set,
-        num_workers=threads,
         batch_size=batch_size,
         shuffle=True,
     )
     testing_data_loader = DataLoader(
         dataset=test_set,
-        num_workers=threads,
         batch_size=test_batch_size,
         shuffle=False,
     )
@@ -279,12 +276,18 @@ def prune():
 
 
 def benchmark():
+    ### Warm Up CUDA runtime
+    A = torch.randn(2048, 2048).to(device)
+    B = torch.randn(2048, 2048).to(device)
+    for _ in range(100):
+        A @ B
+    
+    
     train_set = get_training_set(upscale_factor)
     test_set = get_test_set(upscale_factor)
 
     testing_data_loader = DataLoader(
         dataset=test_set,
-        num_workers=threads,
         batch_size=test_batch_size,
         shuffle=False,
     )
@@ -292,14 +295,30 @@ def benchmark():
     model = torch.load(model_path, map_location=device)
 
     inference_times = []
+    
+    if torch.cuda.is_available():
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
 
-    for data, _ in testing_data_loader:
-        data = data.to(device)
-        tik = time.perf_counter()
-        _ = model(data)
-        tok = time.perf_counter()
+        for data, _ in testing_data_loader:
+            data = data.to(device)
+            
+            start.record()
+            _ = model(data)
+            end.record()
 
-        inference_times.append(tok - tik)
+            torch.cuda.synchronize()
+            
+            inference_times.append(start.elapsed_time(end) / 1000)
+    else:
+        for data, _ in testing_data_loader:
+            data = data.to(device)
+            
+            tik = time.perf_counter()
+            _ = model(data)
+            tok = time.perf_counter()
+            
+            inference_times.append(tok - tik)
 
     print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
     print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
