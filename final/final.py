@@ -281,8 +281,7 @@ def benchmark():
     B = torch.randn(2048, 2048).to(device)
     for _ in range(100):
         A @ B
-    
-    
+
     train_set = get_training_set(upscale_factor)
     test_set = get_test_set(upscale_factor)
 
@@ -295,29 +294,29 @@ def benchmark():
     model = torch.load(model_path, map_location=device)
 
     inference_times = []
-    
+
     if torch.cuda.is_available():
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
 
         for data, _ in testing_data_loader:
             data = data.to(device)
-            
+
             start.record()
             _ = model(data)
             end.record()
 
             torch.cuda.synchronize()
-            
+
             inference_times.append(start.elapsed_time(end) / 1000)
     else:
         for data, _ in testing_data_loader:
             data = data.to(device)
-            
+
             tik = time.perf_counter()
             _ = model(data)
             tok = time.perf_counter()
-            
+
             inference_times.append(tok - tik)
 
     print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
