@@ -270,6 +270,7 @@ def visualize():
         f"figures/{model.__class__.__name__}", format="png"
     )
 
+
 def quantization():
     from nni.algorithms.compression.pytorch.quantization import QAT_Quantizer
 
@@ -293,16 +294,14 @@ def quantization():
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 
-    config_list = [{
-        'quant_types': ['input', 'weight'],
-        'quant_bits': {'input': 8, 'weight': 8},
-        'op_types': ['Conv2d']
-    }, {
-        'quant_types': ['output'],
-        'quant_bits': {'output': 8},
-        'op_types': ['ReLU']
-    }]
-
+    config_list = [
+        {
+            "quant_types": ["input", "weight"],
+            "quant_bits": {"input": 8, "weight": 8},
+            "op_types": ["Conv2d"],
+        },
+        {"quant_types": ["output"], "quant_bits": {"output": 8}, "op_types": ["ReLU"]},
+    ]
 
     dummy_input = torch.rand(32, 1, 28, 28).to(device)
     quantizer = QAT_Quantizer(model, config_list, optimizer, dummy_input)
@@ -331,13 +330,16 @@ def quantization():
     calibration_config = quantizer.export_model(model_path, calibration_path)
 
     print("calibration_config: ", calibration_config)
-    
+
     from nni.compression.pytorch.quantization_speedup import ModelSpeedupTensorRT
+
     input_shape = (32, 1, 28, 28)
-    engine = ModelSpeedupTensorRT(model, input_shape, config=calibration_config, batchsize=32)
+    engine = ModelSpeedupTensorRT(
+        model, input_shape, config=calibration_config, batchsize=32
+    )
     engine.compress()
     test_trt(engine)
-    
+
 
 def prune():
     pass
