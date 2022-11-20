@@ -1,29 +1,31 @@
 from __future__ import print_function
-from math import log10
-import torch.optim as optim
+
 import argparse
-from torch.utils.data import DataLoader
-from os.path import exists, basename
-from os import makedirs, remove
-from six.moves import urllib
-import tarfile
-from torchvision.transforms import Compose, CenterCrop, ToTensor, Resize
-import torch.utils.data as data
-from os import listdir
-from os.path import join
-import torch.nn as nn
-import torch
-from PIL import Image
-from torchvision.transforms import ToTensor
-import os
-import numpy as np
-import sys
 import csv
+import os
+import tarfile
 import time
-from torchviz import make_dot
-from model import SuperResolutionTwitter
-from nni.compression.pytorch.speedup import ModelSpeedup
+from math import log10
+from os import listdir
+from os import makedirs, remove
+from os.path import exists, basename
+from os.path import join
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.utils.data as data
+from PIL import Image
 from nni.compression.pytorch.pruning import *
+from nni.compression.pytorch.speedup import ModelSpeedup
+from six.moves import urllib
+from torch.utils.data import DataLoader
+from torchvision.transforms import Compose, CenterCrop, Resize
+from torchvision.transforms import ToTensor
+from torchviz import make_dot
+
+from model import SuperResolutionTwitter
 
 ### Inference Variables
 USE_EXTERNAL_STORAGE = True if os.environ.get("PROJECT") else False
