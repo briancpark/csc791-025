@@ -13,17 +13,19 @@ source ~/.bashrc
 conda activate csc791
 cd /jet/home/bpark1/csc791-025/final
 
-UPSCALE_FACTOR=3
+UPSCALE_FACTOR=4
 
 MODEL_PATH=/ocean/projects/cis220070p/bpark1/models/original/${UPSCALE_FACTOR}/model_epoch_1000.pth
 
 
 # python3 final.py --mode training --upscale_factor $UPSCALE_FACTOR
 
-for PRUNER in "LevelPruner" "L1NormPruner" "L2NormPruner" "FPGMPruner" "ActivationAPoZRankPruner" "TaylorFOWeightPruner" "ADMMPruner"
+for PRUNER in "LevelPruner" #"L1NormPruner" "L2NormPruner" "FPGMPruner" "ActivationAPoZRankPruner" "TaylorFOWeightPruner" "ADMMPruner"
 do 
     for SPARSITY in 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9
     do
+        PRUNED_MODEL_PATH=/ocean/projects/cis220070p/bpark1/models/${PRUNER}/${UPSCALE_FACTOR}/model_epoch_200.pth
         python3 final.py --mode prune --upscale_factor $UPSCALE_FACTOR --model_path $MODEL_PATH --sparsity $SPARSITY --pruner $PRUNER
+        python3 final.py --mode inference --model_path $PRUNED_MODEL_PATH --upscale_factor $UPSCALE_FACTOR --pruner $PRUNER --sparsity $SPARSITY
     done
 done

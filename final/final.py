@@ -202,15 +202,18 @@ def checkpoint(epoch, model, upscale_factor, prefix="original"):
     print("Checkpoint saved to {}".format(model_out_path))
 
 
-def inference():
+def inference(model_path, upscale_factor, sparsity, pruner="original"):
     # TODO (bcp): Parameterize this
     input_image = "data/BSDS300/images/test/16077.jpg"
-    output_filename = "out.png"
+    if pruner == "original":
+        output_filename = f"figures/out_{upscale_factor}_{pruner}.png"
+    else:
+        output_filename = f"figures/out_{upscale_factor}_{pruner}_{sparsity}.png"
 
     img = Image.open(input_image).convert("YCbCr")
     y, cb, cr = img.split()
 
-    model = torch.load(args.model_path)
+    model = torch.load(model_path)
     img_to_tensor = ToTensor()
     input = img_to_tensor(y).view(1, -1, y.size[1], y.size[0])
 
@@ -424,7 +427,7 @@ def prune(
 
     config_list = [
         {"sparsity_per_layer": sparsity, "op_types": ["Conv2d"]},
-        {"exclude": True, "op_names": ["conv4"]},
+        # {"exclude": True, "op_names": ["conv4"]},
     ]
 
     pruner = opt_pruners[pruner](model, config_list)
@@ -452,7 +455,7 @@ def prune(
     test(testing_data_loader, model, criterion)
 
     optimizer = optim.SGD(model.parameters(), 1e-2)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
 
     if logging:
         with open(
@@ -571,7 +574,7 @@ if __name__ == "__main__":
     parser.add_argument("--momentum", type=float, default=0.5)
     parser.add_argument("--gamma", type=float, default=0.1)
     parser.add_argument("--logging", action="store_true", default=True)
-    parser.add_argument("--pruner", type=str, default="L1NormPruner")
+    parser.add_argument("--pruner", type=str, default="original")
 
     args = parser.parse_args()
     if args.mode == "all":
@@ -601,7 +604,7 @@ if __name__ == "__main__":
             args.logging,
         )
     elif args.mode == "inference":
-        inference()
+        inference(args.model_path, args.upscale_factor, args.sparsity, args.pruner)
     elif args.mode == "visualize":
         visualize(args.upscale_factor)
     elif args.mode == "prune":
