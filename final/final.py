@@ -1,6 +1,7 @@
 from __future__ import print_function
 from math import log10
 import torch.optim as optim
+import argparse
 from torch.utils.data import DataLoader
 from os.path import exists, basename
 from os import makedirs, remove
@@ -21,19 +22,12 @@ import csv
 import time
 from torchviz import make_dot
 from model import SuperResolutionTwitter
+from nni.compression.pytorch.speedup import ModelSpeedup
+from nni.compression.pytorch.pruning import *
 
 ### Inference Variables
-input_image = "data/BSDS300/images/test/16077.jpg"
-model_path = "models/model_epoch_48.pth"
-output_filename = "out.png"
+USE_EXTERNAL_STORAGE = True if os.environ.get("PROJECT") else False
 
-### Training Variables
-upscale_factor = 3
-batch_size = 64
-test_batch_size = 32
-epochs = 1000
-lr = 0.001
-logging = True
 
 device = torch.device(
     "mps"
@@ -189,19 +183,34 @@ def test(data_loader, model, criterion):
     return avg_psnr / len(data_loader)
 
 
-def checkpoint(epoch, model, prefix=None):
-    if prefix:
+def checkpoint(epoch, model, upscale_factor, prefix="original"):
+    if USE_EXTERNAL_STORAGE:
+        PROJECT_DIR = os.environ.get("PROJECT")
+        os.makedirs(
+            "{}/models/{}/{}".format(PROJECT_DIR, prefix, upscale_factor),
+            exist_ok=True,
+        )
+        model_out_path = "{}/models/{}/{}/model_epoch_{}.pth".format(
+            PROJECT_DIR, prefix, upscale_factor, epoch
+        )
+    else:
         os.makedirs("models/{}".format(prefix), exist_ok=True)
-    model_out_path = "models/{}/model_epoch_{}.pth".format(prefix, epoch)
+        model_out_path = "models/{}/{}model_epoch_{}.pth".format(
+            prefix, upscale_factor, epoch
+        )
     torch.save(model, model_out_path)
     print("Checkpoint saved to {}".format(model_out_path))
 
 
 def inference():
+    # TODO (bcp): Parameterize this
+    input_image = "data/BSDS300/images/test/16077.jpg"
+    output_filename = "out.png"
+
     img = Image.open(input_image).convert("YCbCr")
     y, cb, cr = img.split()
 
-    model = torch.load(model_path)
+    model = torch.load(args.model_path)
     img_to_tensor = ToTensor()
     input = img_to_tensor(y).view(1, -1, y.size[1], y.size[0])
 
@@ -223,7 +232,9 @@ def inference():
     print("output image saved to ", output_filename)
 
 
-def training():
+def training(
+    upscale_factor, batch_size, test_batch_size, epochs, lr, step_size, gamma, logging
+):
     train_set = get_training_set(upscale_factor)
     test_set = get_test_set(upscale_factor)
 
@@ -242,11 +253,15 @@ def training():
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
 
     # Initialize logging
     if logging:
-        with open(f"logs/{model.__class__.__name__ }.csv", "w", newline="") as fh:
+        with open(
+            f"logs/original_{upscale_factor}_{model.__class__.__name__ }.csv",
+            "w",
+            newline="",
+        ) as fh:
             writer = csv.writer(fh)
             writer.writerow(["epoch", "train_psnr", "test_psnr", "train_loss"])
 
@@ -254,17 +269,19 @@ def training():
         train_loss = train(training_data_loader, model, criterion, optimizer, epoch)
         train_psnr = test(training_data_loader, model, criterion)
         test_psnr = test(testing_data_loader, model, criterion)
-        checkpoint(epoch, model)
+        checkpoint(epoch, model, upscale_factor)
         scheduler.step()
 
         if logging:
-            with open(f"logs/{model.__class__.__name__ }.csv", "a") as fh:
+            with open(
+                f"logs/original_{upscale_factor}_{model.__class__.__name__ }.csv", "a"
+            ) as fh:
                 writer = csv.writer(fh)
                 writer.writerow([epoch, train_psnr, test_psnr, train_loss])
 
 
-def visualize():
-    model = SuperResolutionTwitter(upscale_factor=3)
+def visualize(upscale_factor):
+    model = SuperResolutionTwitter(upscale_factor=upscale_factor)
     input = torch.randn(1, 1, 300, 300)
     output = model(input)
 
@@ -273,11 +290,11 @@ def visualize():
     )
 
 
-def quantization():
+def quantization(upscale_factor):
     from nni.algorithms.compression.pytorch.quantization import QAT_Quantizer
 
-    train_set = get_training_set(upscale_factor)
-    test_set = get_test_set(upscale_factor)
+    train_set = get_training_set(args.upscale_factor)
+    test_set = get_test_set(args.upscale_factor)
 
     training_data_loader = DataLoader(
         dataset=train_set,
@@ -290,7 +307,7 @@ def quantization():
         shuffle=False,
     )
 
-    model = SuperResolutionTwitter(upscale_factor=3).to(device)
+    model = SuperResolutionTwitter(upscale_factor=upscale_factor).to(device)
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -319,7 +336,7 @@ def quantization():
         train_loss = train(training_data_loader, model, criterion, optimizer, epoch)
         train_psnr = test(training_data_loader, model, criterion)
         test_psnr = test(testing_data_loader, model, criterion)
-        checkpoint(epoch, model)
+        checkpoint(epoch, model, upscale_factor)
         scheduler.step()
 
         if logging:
@@ -343,13 +360,32 @@ def quantization():
     test_trt(engine)
 
 
-def prune():
-    TRIALS = 100
+def prune(
+    upscale_factor,
+    model_path,
+    sparsity,
+    batch_size,
+    test_batch_size,
+    step_size,
+    gamma,
+    finetune_epochs,
+    trials,
+    logging,
+    pruner,
+):
+    opt_pruners = {
+        "LevelPruner": LevelPruner,
+        "L1NormPruner": L1NormPruner,
+        "L2NormPruner": L2NormPruner,
+        "FPGMPruner": FPGMPruner,
+        "ActivationAPoZRankPruner": ActivationAPoZRankPruner,
+        "ActivationMeanRankPruner": ActivationMeanRankPruner,
+        "TaylorFOWeightPruner": TaylorFOWeightPruner,
+        "ADMMPruner": ADMMPruner,
+    }
+
     original_times = []
     pruned_times = []
-
-    from nni.compression.pytorch.pruning import L1NormPruner
-    from nni.compression.pytorch.speedup import ModelSpeedup
 
     train_set = get_training_set(upscale_factor)
     test_set = get_test_set(upscale_factor)
@@ -367,14 +403,14 @@ def prune():
 
     criterion = nn.MSELoss()
 
-    model = torch.load("models/model_epoch_800.pth", map_location=device)
+    model = torch.load(model_path, map_location=device)
     test(testing_data_loader, model, criterion)
     fake_input = torch.randn(1, 1, 300, 300).to(device)
 
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
 
-    for _ in range(TRIALS):
+    for _ in range(trials):
         torch.cuda.synchronize()
         start.record()
         fake_output = model(fake_input)
@@ -387,17 +423,23 @@ def prune():
     print(f"Original model inference time: {np.mean(original_times)} ms")
 
     config_list = [
-        {"sparsity_per_layer": 0.9, "op_types": ["Conv2d"]},
+        {"sparsity_per_layer": sparsity, "op_types": ["Conv2d"]},
         {"exclude": True, "op_names": ["conv4"]},
     ]
 
-    pruner = L1NormPruner(model, config_list)
+    pruner = opt_pruners[pruner](model, config_list)
     _, masks = pruner.compress()
+    for name, mask in masks.items():
+        print(
+            name,
+            " sparsity : ",
+            "{:.2}".format(mask["weight"].sum() / mask["weight"].numel()),
+        )
     pruner._unwrap_model()
 
     ModelSpeedup(model, torch.rand(1, 1, 300, 300).to(device), masks).speedup_model()
 
-    for _ in range(TRIALS):
+    for _ in range(trials):
         torch.cuda.synchronize()
         start.record()
         fake_output = model(fake_input)
@@ -411,17 +453,34 @@ def prune():
 
     optimizer = optim.SGD(model.parameters(), 1e-2)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
-    
+
+    if logging:
+        with open(
+            f"logs/{pruner.__class__.__name__}_{upscale_factor}_{model.__class__.__name__ }.csv",
+            "w",
+            newline="",
+        ) as fh:
+            writer = csv.writer(fh)
+            writer.writerow(["epoch", "train_psnr", "test_psnr", "train_loss"])
+
     # Fine tune the weights
-    for epoch in range(100):
-        train(training_data_loader, model, criterion, optimizer, epoch)
-        test(training_data_loader, model, criterion)
-        test(testing_data_loader, model, criterion)
-        checkpoint(epoch, model, prefix=pruner.__class__.__name__)
+    for epoch in range(1, 1 + finetune_epochs):
+        train_loss = train(training_data_loader, model, criterion, optimizer, epoch)
+        train_psnr = test(training_data_loader, model, criterion)
+        test_psnr = test(testing_data_loader, model, criterion)
+        checkpoint(epoch, model, upscale_factor, prefix=pruner.__class__.__name__)
         scheduler.step()
 
+        if logging:
+            with open(
+                f"logs/{pruner.__class__.__name__}_{upscale_factor}_{model.__class__.__name__ }.csv",
+                "a",
+            ) as fh:
+                writer = csv.writer(fh)
+                writer.writerow([epoch, train_psnr, test_psnr, train_loss])
 
-def benchmark():
+
+def benchmark(upscale_factor, model_path):
     ### Warm Up CUDA runtime
     A = torch.randn(2048, 2048).to(device)
     B = torch.randn(2048, 2048).to(device)
@@ -477,11 +536,11 @@ def benchmark():
     print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
 
 
-def convert_to_onnx():
+def convert_to_onnx(args):
     if not os.path.exists("onnx_models"):
         os.mkdir("onnx_models")
 
-    model = torch.load(model_path).cpu()
+    model = torch.load(args.model_path).cpu()
     x = torch.randn(1, 1, 300, 300)
     torch.onnx.export(
         model,
@@ -495,26 +554,73 @@ def convert_to_onnx():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1:
-        training()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", type=str, default="all")
+    parser.add_argument(
+        "--model_path", type=str, default="models/original/model_epoch_99.pth"
+    )
+    parser.add_argument("--upscale_factor", type=int, default=4)
+    parser.add_argument("--sparsity", type=float, default=0.9)
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--test_batch_size", type=int, default=100)
+    parser.add_argument("--trials", type=int, default=100)
+    parser.add_argument("--epochs", type=int, default=1000)
+    parser.add_argument("--finetune_epochs", type=int, default=200)
+    parser.add_argument("--lr", type=float, default=0.01)
+    parser.add_argument("--step_size", type=int, default=30)
+    parser.add_argument("--momentum", type=float, default=0.5)
+    parser.add_argument("--gamma", type=float, default=0.1)
+    parser.add_argument("--logging", action="store_true", default=True)
+    parser.add_argument("--pruner", type=str, default="L1NormPruner")
+
+    args = parser.parse_args()
+    if args.mode == "all":
+        training(
+            args.upscale_factor,
+            args.batch_size,
+            args.test_batch_size,
+            args.epochs,
+            args.lr,
+            args.step_size,
+            args.gamma,
+            args.logging,
+        )
         inference()
-        visualize()
+        visualize(args.upscale_factor)
         prune()
         benchmark()
-    elif sys.argv[1] == "training":
-        training()
-    elif sys.argv[1] == "inference":
+    elif args.mode == "training":
+        training(
+            args.upscale_factor,
+            args.batch_size,
+            args.test_batch_size,
+            args.epochs,
+            args.lr,
+            args.step_size,
+            args.gamma,
+            args.logging,
+        )
+    elif args.mode == "inference":
         inference()
-    elif sys.argv[1] == "visualize":
-        visualize()
-    elif sys.argv[1] == "prune":
-        prune()
-    elif sys.argv[1] == "quantization":
-        quantization()
-    elif sys.argv[1] == "benchmark":
-        benchmark()
-    elif sys.argv[1] == "onnx":
-        convert_to_onnx()
-    else:
-        print("Invalid argument")
-        print("Example usage: python3 final.py training")
+    elif args.mode == "visualize":
+        visualize(args.upscale_factor)
+    elif args.mode == "prune":
+        prune(
+            args.upscale_factor,
+            args.model_path,
+            args.sparsity,
+            args.batch_size,
+            args.test_batch_size,
+            args.step_size,
+            args.gamma,
+            args.finetune_epochs,
+            args.trials,
+            args.logging,
+            args.pruner,
+        )
+    elif args.mode == "quantization":
+        quantization(args)
+    elif args.mode == "benchmark":
+        benchmark(args.upscale_factor, args.model_path)
+    elif args.mode == "onnx":
+        convert_to_onnx(args)

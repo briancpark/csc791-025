@@ -5,10 +5,25 @@
 #SBATCH -t 48:00:00
 #SBATCH --gres=gpu:1
 
+module load cuda
+module load cudnn
+module load nvhpc
 nvidia-smi
 source ~/.bashrc
 conda activate csc791
 cd /jet/home/bpark1/csc791-025/final
 
-python3 final.py training
-python3 final.py inference
+UPSCALE_FACTOR=3
+
+MODEL_PATH=/ocean/projects/cis220070p/bpark1/models/original/${UPSCALE_FACTOR}/model_epoch_1000.pth
+
+
+# python3 final.py --mode training --upscale_factor $UPSCALE_FACTOR
+
+for PRUNER in "LevelPruner" "L1NormPruner" "L2NormPruner" "FPGMPruner" "ActivationAPoZRankPruner" "TaylorFOWeightPruner" "ADMMPruner"
+do 
+    for SPARSITY in 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9
+    do
+        python3 final.py --mode prune --upscale_factor $UPSCALE_FACTOR --model_path $MODEL_PATH --sparsity $SPARSITY --pruner $PRUNER
+    done
+done
