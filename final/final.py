@@ -189,8 +189,10 @@ def test(data_loader, model, criterion):
     return avg_psnr / len(data_loader)
 
 
-def checkpoint(epoch, model):
-    model_out_path = "models/model_epoch_{}.pth".format(epoch)
+def checkpoint(epoch, model, prefix=None):
+    if prefix:
+        os.makedirs("models/{}".format(prefix), exist_ok=True)
+    model_out_path = "models/{}/model_epoch_{}.pth".format(prefix, epoch)
     torch.save(model, model_out_path)
     print("Checkpoint saved to {}".format(model_out_path))
 
@@ -342,7 +344,81 @@ def quantization():
 
 
 def prune():
-    pass
+    TRIALS = 100
+    original_times = []
+    pruned_times = []
+
+    from nni.compression.pytorch.pruning import L1NormPruner
+    from nni.compression.pytorch.speedup import ModelSpeedup
+
+    train_set = get_training_set(upscale_factor)
+    test_set = get_test_set(upscale_factor)
+
+    training_data_loader = DataLoader(
+        dataset=train_set,
+        batch_size=batch_size,
+        shuffle=True,
+    )
+    testing_data_loader = DataLoader(
+        dataset=test_set,
+        batch_size=test_batch_size,
+        shuffle=False,
+    )
+
+    criterion = nn.MSELoss()
+
+    model = torch.load("models/model_epoch_800.pth", map_location=device)
+    test(testing_data_loader, model, criterion)
+    fake_input = torch.randn(1, 1, 300, 300).to(device)
+
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+
+    for _ in range(TRIALS):
+        torch.cuda.synchronize()
+        start.record()
+        fake_output = model(fake_input)
+        end.record()
+
+        torch.cuda.synchronize()
+        elapsed_time_ms = start.elapsed_time(end)
+        original_times.append(elapsed_time_ms)
+
+    print(f"Original model inference time: {np.mean(original_times)} ms")
+
+    config_list = [
+        {"sparsity_per_layer": 0.9, "op_types": ["Conv2d"]},
+        {"exclude": True, "op_names": ["conv4"]},
+    ]
+
+    pruner = L1NormPruner(model, config_list)
+    _, masks = pruner.compress()
+    pruner._unwrap_model()
+
+    ModelSpeedup(model, torch.rand(1, 1, 300, 300).to(device), masks).speedup_model()
+
+    for _ in range(TRIALS):
+        torch.cuda.synchronize()
+        start.record()
+        fake_output = model(fake_input)
+        end.record()
+
+        torch.cuda.synchronize()
+        elapsed_time_ms = start.elapsed_time(end)
+        pruned_times.append(elapsed_time_ms)
+    print(f"Pruned model inference time: {np.mean(pruned_times)} ms")
+    test(testing_data_loader, model, criterion)
+
+    optimizer = optim.SGD(model.parameters(), 1e-2)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
+    
+    # Fine tune the weights
+    for epoch in range(100):
+        train(training_data_loader, model, criterion, optimizer, epoch)
+        test(training_data_loader, model, criterion)
+        test(testing_data_loader, model, criterion)
+        checkpoint(epoch, model, prefix=pruner.__class__.__name__)
+        scheduler.step()
 
 
 def benchmark():
