@@ -50,7 +50,7 @@ class RDN(nn.Module):
     https://arxiv.org/abs/1802.08797
     """
 
-    def __init__(self,upscale_factor, channel=1, growth_rate=64, rdb_number=3):
+    def __init__(self, upscale_factor, channel=1, growth_rate=64, rdb_number=3):
         super(RDN, self).__init__()
         self.SFF1 = nn.Conv2d(
             in_channels=channel, out_channels=64, kernel_size=3, padding=1, stride=1
