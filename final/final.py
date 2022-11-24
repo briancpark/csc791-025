@@ -20,6 +20,7 @@ from PIL import Image
 from nni.compression.pytorch.pruning import *
 from nni.compression.pytorch.speedup import ModelSpeedup
 from six.moves import urllib
+import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, CenterCrop, Resize
 from torchvision.transforms import ToTensor
@@ -56,14 +57,21 @@ def is_image_file(filename):
     return any(filename.endswith(extension) for extension in [".png", ".jpg", ".jpeg"])
 
 
-def load_img(filepath):
-    img = Image.open(filepath).convert("YCbCr")
-    y, _, _ = img.split()
-    return y
+def load_img(filepath, ycbcr=True):
+    if ycbcr:
+        img = Image.open(filepath).convert("YCbCr")
+        y, _, _ = img.split()
+        return y
+
+    else:
+        img = Image.open(filepath)
+        return img
 
 
 class DatasetFromFolder(data.Dataset):
-    def __init__(self, image_dir, input_transform=None, target_transform=None):
+    def __init__(
+        self, image_dir, input_transform=None, target_transform=None, ycbcr=True
+    ):
         super(DatasetFromFolder, self).__init__()
         self.image_filenames = [
             join(image_dir, x) for x in listdir(image_dir) if is_image_file(x)
@@ -71,9 +79,10 @@ class DatasetFromFolder(data.Dataset):
 
         self.input_transform = input_transform
         self.target_transform = target_transform
+        self.ycbcr = ycbcr
 
     def __getitem__(self, index):
-        input = load_img(self.image_filenames[index])
+        input = load_img(self.image_filenames[index], ycbcr=self.ycbcr)
         target = input.copy()
         if self.input_transform:
             input = self.input_transform(input)
@@ -133,7 +142,7 @@ def target_transform(crop_size):
     )
 
 
-def get_training_set(upscale_factor):
+def get_training_set(upscale_factor, ycbcr=True):
     root_dir = download_bsd300()
     train_dir = join(root_dir, "train")
     crop_size = calculate_valid_crop_size(256, upscale_factor)
@@ -142,10 +151,11 @@ def get_training_set(upscale_factor):
         train_dir,
         input_transform=input_transform(crop_size, upscale_factor),
         target_transform=target_transform(crop_size),
+        ycbcr=ycbcr,
     )
 
 
-def get_test_set(upscale_factor):
+def get_test_set(upscale_factor, ycbcr=True):
     root_dir = download_bsd300()
     test_dir = join(root_dir, "test")
     crop_size = calculate_valid_crop_size(256, upscale_factor)
@@ -154,6 +164,7 @@ def get_test_set(upscale_factor):
         test_dir,
         input_transform=input_transform(crop_size, upscale_factor),
         target_transform=target_transform(crop_size),
+        ycbcr=ycbcr,
     )
 
 
@@ -259,8 +270,38 @@ def training(
     logging,
     model_name,
 ):
-    train_set = get_training_set(upscale_factor)
-    test_set = get_test_set(upscale_factor)
+    if model_name == "FMEN":
+        model = FMEN(upscale_factor=upscale_factor).to(device)  # works 3
+        ycbcr = False
+    elif model_name == "RDN":
+        model = RDN(upscale_factor=upscale_factor, channel=3).to(device)  # works 3 1
+        ycbcr = False
+    elif model_name == "SuperResolutionByteDance":
+        model = SuperResolutionByteDance(
+            upscale_factor=upscale_factor, in_nc=3, out_nc=3
+        ).to(
+            device
+        )  # works 3 1
+        ycbcr = False
+    elif model_name == "SuperResolutionTwitter":
+        model = SuperResolutionTwitter(upscale_factor=upscale_factor).to(
+            device
+        )  # works 1
+        ycbcr = True
+    elif model_name == "VDSR":
+        model = VDSR().to(device)  # doesn't work with 1 or 3
+        ycbcr = False
+    elif model_name == "WDSR":
+        model = WDSR(upscale_factor=upscale_factor, num_channels=3).to(
+            device
+        )  # works 3 1
+        ycbcr = False
+    else:
+        print("Invalid model name")
+        return
+
+    train_set = get_training_set(upscale_factor, ycbcr)
+    test_set = get_test_set(upscale_factor, ycbcr)
 
     training_data_loader = DataLoader(
         dataset=train_set,
@@ -272,27 +313,6 @@ def training(
         batch_size=test_batch_size,
         shuffle=False,
     )
-
-    # Users 1
-    # SuperResolutionTwitter, RDN
-
-    if model_name == "FMEN":
-        model = FMEN(upscale_factor=upscale_factor).to(device)
-    elif model_name == "RDN":
-        model = RDN(upscale_factor=upscale_factor).to(device)
-    elif model_name == "SuperResolutionByteDance":
-        model = SuperResolutionByteDance(
-            upscale_factor=upscale_factor, in_nc=1, out_nc=1
-        ).to(device)
-    elif model_name == "SuperResolutionTwitter":
-        model = SuperResolutionTwitter(upscale_factor=upscale_factor).to(device)
-    elif model_name == "VDSR":
-        model = VDSR().to(device)
-    elif model_name == "WDSR":
-        model = WDSR(upscale_factor=upscale_factor, num_channels=1).to(device)
-    else:
-        print("Invalid model name")
-        return
 
     criterion = model.criterion
     optimizer = model.optimizer
