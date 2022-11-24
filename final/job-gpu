@@ -5,9 +5,8 @@
 #SBATCH -t 48:00:00
 #SBATCH --gres=gpu:1
 
-module load cuda
-module load cudnn
-module load nvhpc
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$PROJECT/anaconda3/lib
+module load cuda cudnn nvhpc
 nvidia-smi
 source ~/.bashrc
 conda activate csc791
@@ -29,3 +28,8 @@ do
         python3 final.py --mode inference --model_path $PRUNED_MODEL_PATH --upscale_factor $UPSCALE_FACTOR --pruner $PRUNER --sparsity $SPARSITY
     done
 done
+
+
+# python3 final.py --mode onnx --model_path $PROJECT/models/original/4/model_epoch_1000.pth
+# python3 final.py --mode coreml --model_path $PROJECT/models/original/4/model_epoch_1000.pth
+# python3 final.py --mode tensorrt --model_path $PROJECT/models/original/4/model_epoch_1000.pth

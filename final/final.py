@@ -207,6 +207,7 @@ def checkpoint(epoch, model, upscale_factor, prefix="original"):
 def inference(model_path, upscale_factor, sparsity, pruner="original"):
     # TODO (bcp): Parameterize this
     input_image = "data/BSDS300/images/test/16077.jpg"
+    # input_image = "data/BSDS300/images/test/385039.jpg"
     if pruner == "original":
         output_filename = f"figures/out_{upscale_factor}_{pruner}.png"
     else:
@@ -293,6 +294,52 @@ def visualize(upscale_factor):
     make_dot(output, params=dict(list(model.named_parameters()))).render(
         f"figures/{model.__class__.__name__}", format="png"
     )
+
+    input = input.to(device)
+    model = model.to(device)
+
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+
+    original_times = []
+    for _ in range(1000):
+        torch.cuda.synchronize()
+        start.record()
+        output = model(input)
+        end.record()
+
+        torch.cuda.synchronize()
+        elapsed_time_ms = start.elapsed_time(end)
+        original_times.append(elapsed_time_ms)
+    print(f"Original: {np.mean(original_times)}")
+
+    from model import RDN
+
+    input = torch.randn(1, 1, 300, 300)
+    model = RDN(upscale_factor=upscale_factor)
+    output = model(input)
+
+    make_dot(output, params=dict(list(model.named_parameters()))).render(
+        f"figures/{model.__class__.__name__}", format="png"
+    )
+
+    input = input.to(device)
+    model = model.to(device)
+
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+
+    original_times = []
+    for _ in range(1000):
+        torch.cuda.synchronize()
+        start.record()
+        output = model(input)
+        end.record()
+
+        torch.cuda.synchronize()
+        elapsed_time_ms = start.elapsed_time(end)
+        original_times.append(elapsed_time_ms)
+    print(f"Original: {np.mean(original_times)}")
 
 
 def quantization(upscale_factor):
@@ -541,11 +588,11 @@ def benchmark(upscale_factor, model_path):
     print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
 
 
-def convert_to_onnx(args):
+def convert_to_onnx(model_path):
     if not os.path.exists("onnx_models"):
         os.mkdir("onnx_models")
 
-    model = torch.load(args.model_path).cpu()
+    model = torch.load(model_path, map_location=device).cpu()
     x = torch.randn(1, 1, 300, 300)
     torch.onnx.export(
         model,
@@ -554,8 +601,71 @@ def convert_to_onnx(args):
         do_constant_folding=True,
         input_names=["input"],
         output_names=["output"],
-        opset_version=11,  # XGen supports 11 or 9
+        opset_version=9,  # XGen supports 11 or 9
+        export_params=True,
     )
+
+
+def convert_to_coreml(model_path):
+    # https://coremltools.readme.io/docs/pytorch-conversion
+    import coremltools as ct
+
+    if not os.path.exists("coreml_models"):
+        os.mkdir("coreml_models")
+
+    torch_model = torch.load(model_path, map_location=device).cpu()
+    # Set the model in evaluation mode.
+    torch_model.eval()
+
+    # Trace the model with random data.
+    example_input = torch.rand(1, 1, 300, 300)
+    traced_model = torch.jit.trace(torch_model, example_input)
+    out = traced_model(example_input)
+
+    # Using image_input in the inputs parameter:
+    # Convert to Core ML program using the Unified Conversion API.
+    model = ct.convert(
+        traced_model,
+        convert_to="mlprogram",
+        inputs=[ct.TensorType(shape=example_input.shape)],
+    )
+
+    # Save the converted model.
+    model.save(f"coreml_models/{model.__class__.__name__}.mlpackage")
+
+
+def convert_to_tensorrt(model_path):
+    # https://pytorch.org/TensorRT/getting_started/getting_started_with_python_api.html
+    import torch_tensorrt
+
+    if not os.path.exists("tensorrt_models"):
+        os.mkdir("tensorrt_models")
+
+    # torch module needs to be in eval (not training) mode
+    model = torch.load(model_path, map_location=device).cpu()
+
+    inputs = [
+        torch_tensorrt.Input(
+            min_shape=[1, 1, 300, 300],
+            opt_shape=[1, 1, 300, 300],
+            max_shape=[1, 1, 300, 300],
+            dtype=torch.float,  # torch.half
+        )
+    ]
+    enabled_precisions = {torch.float}  # torch.half, Run with fp16
+
+    trt_ts_module = torch_tensorrt.compile(
+        model, inputs=inputs, enabled_precisions=enabled_precisions
+    )
+
+    input_data = torch.randn(1, 1, 300, 300).to(device)
+    result = trt_ts_module(input_data)
+    torch.jit.save(trt_ts_module, f"tensorrt_models/{model.__class__.__name__}.ts")
+
+    # Deployment application
+    trt_ts_module = torch.jit.load(f"tensorrt_models/{model.__class__.__name__}.ts")
+    input_data = input_data.to(device)
+    result = trt_ts_module(input_data)
 
 
 if __name__ == "__main__":
@@ -628,4 +738,8 @@ if __name__ == "__main__":
     elif args.mode == "benchmark":
         benchmark(args.upscale_factor, args.model_path)
     elif args.mode == "onnx":
-        convert_to_onnx(args)
+        convert_to_onnx(args.model_path)
+    elif args.mode == "coreml":
+        convert_to_coreml(args.model_path)
+    elif args.mode == "tensorrt":
+        convert_to_tensorrt(args.model_path)

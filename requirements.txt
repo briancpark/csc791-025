@@ -1,7 +1,7 @@
 nni>=2.9
-torch>=1.12.0
-torchaudio>=0.12.0
-torchvision>=0.13.0
+torch==1.12.0
+torchaudio<0.13.0
+torchvision<0.13.0
 tensorboard<=2.80
 torchviz>=0.0.2
 black
@@ -11,8 +11,13 @@ matplotlib
 onnx
 apache-tvm
 tqdm
-onnx
 nvidia-pyindex
 nvidia-tensorrt
 pycuda
 apache-tvm-cu116 -f https://tlcpack.ai/wheels
+coremltools
+onnxruntime
+onnxruntime-gpu
+torch-tensorrt -f https://github.com/pytorch/TensorRT/releases/download/v1.2.0/torch_tensorrt-1.2.0-cp310-cp310-linux_x86_64.whl
+torch-tensorrt -f https://github.com/pytorch/TensorRT/releases/download/v1.1.0/torch_tensorrt-1.1.0-cp310-cp310-linux_x86_64.whl
+
