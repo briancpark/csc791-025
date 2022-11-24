@@ -25,8 +25,6 @@ from torchvision.transforms import Compose, CenterCrop, Resize
 from torchvision.transforms import ToTensor
 from torchviz import make_dot
 
-from model import SuperResolutionTwitter
-
 ### Inference Variables
 USE_EXTERNAL_STORAGE = True if os.environ.get("PROJECT") else False
 

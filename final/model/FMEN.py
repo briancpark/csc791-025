@@ -1,11 +1,6 @@
 from __future__ import print_function
 
-import torch
-import math
-from math import sqrt
 from torch import nn as nn
-from torch.nn import init as init
-from torch.nn.parameter import Parameter
 
 lrelu_value = 0.1
 act = nn.LeakyReLU(lrelu_value)

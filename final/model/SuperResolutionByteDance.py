@@ -1,10 +1,18 @@
-import torch
+from collections import OrderedDict
+
 import torch.nn as nn
 import torch.nn.functional as F
-from collections import OrderedDict
 
 
 class SuperResolutionByteDance(nn.Module):
+    """
+    Residual Local Feature Network for Efficient Super-Resolution
+
+    Fangyuan Kong, Mingxi Li, Songwei Liu, Ding Liu, Jingwen He, Yang Bai, Fangmin Chen, Lean Fu
+
+    https://arxiv.org/abs/2205.07514
+    """
+
     def __init__(self, in_nc=3, out_nc=3, nf=46, mf=48, upscale=4):
         super(SuperResolutionByteDance, self).__init__()
 

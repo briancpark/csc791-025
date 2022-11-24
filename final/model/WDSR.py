@@ -1,11 +1,10 @@
 from __future__ import print_function
 
-import torch
 import math
-from math import sqrt
+
+import torch
 from torch import nn as nn
 from torch.nn import init as init
-from torch.nn.parameter import Parameter
 
 
 class WDSR(nn.Module):
