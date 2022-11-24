@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import torch
 from torch import nn as nn
 
 lrelu_value = 0.1
@@ -15,7 +16,7 @@ class FMEN(nn.Module):
     https://arxiv.org/abs/2204.08397
     """
 
-    def __init__(self):
+    def __init__(self, upscale_factor):
         super(FMEN, self).__init__()
 
         self.down_blocks = 4
@@ -24,7 +25,6 @@ class FMEN(nn.Module):
         mid_feats = 16
         n_feats = 50
         n_colors = 3
-        scale = 4
 
         # define head module
         self.head = nn.Conv2d(n_colors, n_feats, 3, 1, 1)
@@ -48,7 +48,14 @@ class FMEN(nn.Module):
 
         # define tail module
         self.tail = nn.Sequential(
-            nn.Conv2d(n_feats, n_colors * (scale**2), 3, 1, 1), nn.PixelShuffle(scale)
+            nn.Conv2d(n_feats, n_colors * (upscale_factor**2), 3, 1, 1),
+            nn.PixelShuffle(upscale_factor),
+        )
+
+        self.criterion = nn.MSELoss()
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.01)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(
+            self.optimizer, step_size=30, gamma=0.1
         )
 
     def forward(self, x):

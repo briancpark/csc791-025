@@ -1,5 +1,6 @@
 from collections import OrderedDict
 
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -13,7 +14,7 @@ class SuperResolutionByteDance(nn.Module):
     https://arxiv.org/abs/2205.07514
     """
 
-    def __init__(self, in_nc=3, out_nc=3, nf=46, mf=48, upscale=4):
+    def __init__(self, upscale_factor, in_nc=3, out_nc=3, nf=46, mf=48):
         super(SuperResolutionByteDance, self).__init__()
 
         self.fea_conv = conv_layer(in_nc, nf, kernel_size=3)
@@ -26,8 +27,16 @@ class SuperResolutionByteDance(nn.Module):
         self.LR_conv = conv_layer(nf, nf, kernel_size=3)
 
         upsample_block = pixelshuffle_block
-        self.upsampler = upsample_block(nf, out_nc, upscale_factor=upscale)
+        self.upsampler = upsample_block(nf, out_nc, upscale_factor=upscale_factor)
         self.scale_idx = 0
+
+        self.criterion = nn.MSELoss()
+        self.optimizer = torch.optim.SGD(
+            self.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4, nesterov=False
+        )
+        self.scheduler = torch.optim.lr_scheduler.StepLR(
+            self.optimizer, step_size=30, gamma=0.1
+        )
 
     def forward(self, input):
         out_fea = self.fea_conv(input)

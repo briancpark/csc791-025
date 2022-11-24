@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import torch
 from torch import nn as nn
 from torch.nn import init as init
 
@@ -24,6 +25,12 @@ class SuperResolutionTwitter(nn.Module):
         self.pixel_shuffle = nn.PixelShuffle(upscale_factor)
 
         self._initialize_weights()
+
+        self.criterion = nn.MSELoss()
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.01)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(
+            self.optimizer, step_size=30, gamma=0.1
+        )
 
     def forward(self, x):
         x = self.relu(self.conv1(x))

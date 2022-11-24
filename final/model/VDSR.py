@@ -17,6 +17,8 @@ class VDSR(nn.Module):
 
     def __init__(self) -> None:
         super(VDSR, self).__init__()
+        # Upscale factor is determined by test image shape
+
         # Input layer
         self.conv1 = nn.Sequential(
             nn.Conv2d(1, 64, (3, 3), (1, 1), (1, 1), bias=False),
@@ -34,6 +36,14 @@ class VDSR(nn.Module):
 
         # Initialize model weights
         self._initialize_weights()
+
+        self.criterion = nn.MSELoss()
+        self.optimizer = torch.optim.SGD(
+            self.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4, nesterov=False
+        )
+        self.scheduler = torch.optim.lr_scheduler.StepLR(
+            self.optimizer, step_size=30, gamma=0.1
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self._forward_impl(x)

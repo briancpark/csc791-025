@@ -24,6 +24,15 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, CenterCrop, Resize
 from torchvision.transforms import ToTensor
 from torchviz import make_dot
+from model import (
+    FMEN,
+    RDN,
+    SuperResolutionByteDance,
+    SuperResolutionTwitter,
+    VDSR,
+    WDSR,
+)
+
 
 ### Inference Variables
 USE_EXTERNAL_STORAGE = True if os.environ.get("PROJECT") else False
@@ -154,7 +163,8 @@ def train(data_loader, model, criterion, optimizer, epoch):
         input, target = batch[0].to(device), batch[1].to(device)
 
         optimizer.zero_grad()
-        loss = criterion(model(input), target)
+        output = model(input)
+        loss = criterion(output, target)
         epoch_loss += loss.item()
         loss.backward()
         optimizer.step()
@@ -187,11 +197,13 @@ def checkpoint(epoch, model, upscale_factor, prefix="original"):
     if USE_EXTERNAL_STORAGE:
         PROJECT_DIR = os.environ.get("PROJECT")
         os.makedirs(
-            "{}/models/{}/{}".format(PROJECT_DIR, prefix, upscale_factor),
+            "{}/models/{}/{}/{}".format(
+                PROJECT_DIR, model.__class__.__name__, prefix, upscale_factor
+            ),
             exist_ok=True,
         )
-        model_out_path = "{}/models/{}/{}/model_epoch_{}.pth".format(
-            PROJECT_DIR, prefix, upscale_factor, epoch
+        model_out_path = "{}/models/{}/{}/{}/model_epoch_{}.pth".format(
+            PROJECT_DIR, model.__class__.__name__, prefix, upscale_factor, epoch
         )
     else:
         os.makedirs("models/{}".format(prefix), exist_ok=True)
@@ -237,7 +249,15 @@ def inference(model_path, upscale_factor, sparsity, pruner="original"):
 
 
 def training(
-    upscale_factor, batch_size, test_batch_size, epochs, lr, step_size, gamma, logging
+    upscale_factor,
+    batch_size,
+    test_batch_size,
+    epochs,
+    lr,
+    step_size,
+    gamma,
+    logging,
+    model_name,
 ):
     train_set = get_training_set(upscale_factor)
     test_set = get_test_set(upscale_factor)
@@ -253,11 +273,30 @@ def training(
         shuffle=False,
     )
 
-    model = SuperResolutionTwitter(upscale_factor=upscale_factor).to(device)
+    # Users 1
+    # SuperResolutionTwitter, RDN
 
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
+    if model_name == "FMEN":
+        model = FMEN(upscale_factor=upscale_factor).to(device)
+    elif model_name == "RDN":
+        model = RDN(upscale_factor=upscale_factor).to(device)
+    elif model_name == "SuperResolutionByteDance":
+        model = SuperResolutionByteDance(
+            upscale_factor=upscale_factor, in_nc=1, out_nc=1
+        ).to(device)
+    elif model_name == "SuperResolutionTwitter":
+        model = SuperResolutionTwitter(upscale_factor=upscale_factor).to(device)
+    elif model_name == "VDSR":
+        model = VDSR().to(device)
+    elif model_name == "WDSR":
+        model = WDSR(upscale_factor=upscale_factor, num_channels=1).to(device)
+    else:
+        print("Invalid model name")
+        return
+
+    criterion = model.criterion
+    optimizer = model.optimizer
+    scheduler = model.scheduler
 
     # Initialize logging
     if logging:
@@ -548,7 +587,7 @@ def benchmark(upscale_factor, model_path):
     print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
 
 
-def convert_to_onnx(model_path):
+def convert_to_onnx(model_path, channels=3):
     # Pinning to opset 9, as DepthToSpace is broken in XGen for blocksize != 4
     opset_version = 9
 
@@ -557,11 +596,12 @@ def convert_to_onnx(model_path):
 
     model = torch.load(model_path, map_location=device).cpu()
 
-    x = torch.randn(1, 3, 300, 300)
+    input = torch.randn(1, channels, 300, 300)
+
     torch.onnx.export(
         model,
-        x,
-        f"onnx_models/{model.__class__.__name__}_{opset_version}.onnx",
+        input,
+        f"onnx_models/{model.__class__.__name__}.onnx",
         do_constant_folding=True,
         input_names=["input"],
         output_names=["output"],
@@ -570,7 +610,7 @@ def convert_to_onnx(model_path):
     )
 
 
-def convert_to_coreml(model_path):
+def convert_to_coreml(model_path, channels=3):
     # https://coremltools.readme.io/docs/pytorch-conversion
     import coremltools as ct
 
@@ -582,23 +622,23 @@ def convert_to_coreml(model_path):
     torch_model.eval()
 
     # Trace the model with random data.
-    example_input = torch.rand(1, 1, 300, 300)
-    traced_model = torch.jit.trace(torch_model, example_input)
-    out = traced_model(example_input)
+    input = torch.rand(1, channels, 300, 300)
+    traced_model = torch.jit.trace(torch_model, input)
+    out = traced_model(input)
 
     # Using image_input in the inputs parameter:
     # Convert to Core ML program using the Unified Conversion API.
     model = ct.convert(
         traced_model,
         convert_to="mlprogram",
-        inputs=[ct.TensorType(shape=example_input.shape)],
+        inputs=[ct.TensorType(shape=input.shape)],
     )
 
     # Save the converted model.
     model.save(f"coreml_models/{model.__class__.__name__}.mlpackage")
 
 
-def convert_to_tensorrt(model_path):
+def convert_to_tensorrt(model_path, channels=3):
     # https://pytorch.org/TensorRT/getting_started/getting_started_with_python_api.html
     import torch_tensorrt
 
@@ -610,9 +650,9 @@ def convert_to_tensorrt(model_path):
 
     inputs = [
         torch_tensorrt.Input(
-            min_shape=[1, 1, 300, 300],
-            opt_shape=[1, 1, 300, 300],
-            max_shape=[1, 1, 300, 300],
+            min_shape=[1, channels, 300, 300],
+            opt_shape=[1, channels, 300, 300],
+            max_shape=[1, channels, 300, 300],
             dtype=torch.float,  # torch.half
         )
     ]
@@ -622,14 +662,14 @@ def convert_to_tensorrt(model_path):
         model, inputs=inputs, enabled_precisions=enabled_precisions
     )
 
-    input_data = torch.randn(1, 1, 300, 300).to(device)
-    result = trt_ts_module(input_data)
+    input = torch.randn(1, channels, 300, 300).to(device)
+    result = trt_ts_module(input)
     torch.jit.save(trt_ts_module, f"tensorrt_models/{model.__class__.__name__}.ts")
 
     # Deployment application
     trt_ts_module = torch.jit.load(f"tensorrt_models/{model.__class__.__name__}.ts")
-    input_data = input_data.to(device)
-    result = trt_ts_module(input_data)
+    input = input.to(device)
+    result = trt_ts_module(input)
 
 
 if __name__ == "__main__":
@@ -651,6 +691,8 @@ if __name__ == "__main__":
     parser.add_argument("--gamma", type=float, default=0.1)
     parser.add_argument("--logging", action="store_true", default=True)
     parser.add_argument("--pruner", type=str, default="original")
+    parser.add_argument("--channels", type=int, default=3)
+    parser.add_argument("--model_name", type=str, default="SuperResolutionTwitter")
 
     args = parser.parse_args()
     if args.mode == "all":
@@ -663,6 +705,7 @@ if __name__ == "__main__":
             args.step_size,
             args.gamma,
             args.logging,
+            args.model_name,
         )
         inference()
         visualize(args.upscale_factor)
@@ -678,6 +721,7 @@ if __name__ == "__main__":
             args.step_size,
             args.gamma,
             args.logging,
+            args.model_name,
         )
     elif args.mode == "inference":
         inference(args.model_path, args.upscale_factor, args.sparsity, args.pruner)
@@ -702,11 +746,11 @@ if __name__ == "__main__":
     elif args.mode == "benchmark":
         benchmark(args.upscale_factor, args.model_path)
     elif args.mode == "onnx":
-        convert_to_onnx(args.model_path)
+        convert_to_onnx(args.model_path, channels=args.channels)
     elif args.mode == "coreml":
-        convert_to_coreml(args.model_path)
+        convert_to_coreml(args.model_path, channels=args.channels)
     elif args.mode == "tensorrt":
-        convert_to_tensorrt(args.model_path)
+        convert_to_tensorrt(args.model_path, channels=args.channels)
     elif args.mode == "quant":
         from onnxmltools.utils.float16_converter import (
             convert_float_to_float16_model_path,
@@ -718,104 +762,3 @@ if __name__ == "__main__":
         )
         save_model(new_onnx_model, "onnx_models/SRTfp16.onnx")
         # /ocean/projects/cis220070p/bpark1/models/original/4/model_epoch_1000.pt
-    elif args.mode == "tester":
-        from model import SuperResolutionTwitter
-
-        # from model import RDN, WDSR, VDSR
-
-        # BNECHMARK TWITTER
-        input = torch.randn(1, 1, 300, 300).to(device)
-        model = SuperResolutionTwitter(upscale_factor=4).to(device)
-
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-
-        original_times = []
-        for _ in range(1000):
-            torch.cuda.synchronize()
-            start.record()
-            output = model(input)
-            end.record()
-
-            torch.cuda.synchronize()
-            elapsed_time_ms = start.elapsed_time(end)
-            original_times.append(elapsed_time_ms)
-        print(f"Original: {np.mean(original_times[5:])}")
-
-        # # BNECHMARK RDN
-        # model = RDN(upscale_factor=4).to(device)
-
-        # start = torch.cuda.Event(enable_timing=True)
-        # end = torch.cuda.Event(enable_timing=True)
-
-        # original_times = []
-        # for _ in range(1000):
-        #     torch.cuda.synchronize()
-        #     start.record()
-        #     output = model(input)
-        #     end.record()
-
-        #     torch.cuda.synchronize()
-        #     elapsed_time_ms = start.elapsed_time(end)
-        #     original_times.append(elapsed_time_ms)
-        # print(f"Original: {np.mean(original_times[5:])}")
-
-        # # BENCHMARK WDSR
-        # input = torch.randn(1, 3, 300, 300).to(device)
-        # model = WDSR(upscale_factor=4).to(device)
-
-        # start = torch.cuda.Event(enable_timing=True)
-        # end = torch.cuda.Event(enable_timing=True)
-
-        # original_times = []
-        # for _ in range(1000):
-        #     torch.cuda.synchronize()
-        #     start.record()
-        #     output = model(input)
-        #     end.record()
-
-        #     torch.cuda.synchronize()
-        #     elapsed_time_ms = start.elapsed_time(end)
-        #     original_times.append(elapsed_time_ms)
-        # print(f"Original: {np.mean(original_times[5:])}")
-
-        # # BENCHMARK VDSR
-        # input = torch.randn(1, 1, 300, 300).to(device)
-        # model = VDSR().to(device)
-
-        # start = torch.cuda.Event(enable_timing=True)
-        # end = torch.cuda.Event(enable_timing=True)
-
-        # original_times = []
-        # for _ in range(1000):
-        #     torch.cuda.synchronize()
-        #     start.record()
-        #     output = model(input)
-        #     end.record()
-
-        #     torch.cuda.synchronize()
-        #     elapsed_time_ms = start.elapsed_time(end)
-        #     original_times.append(elapsed_time_ms)
-        # print(f"Original: {np.mean(original_times[5:])}")
-
-        # input = torch.randn(1, 3, 300, 300).to(device)
-        # # from model import RLFN_cut
-        # # model = RLFN_cut(in_nc=3, out_nc=3).to(device)
-        # from model import FMEN
-        # model = FMEN().to(device)
-        # model.eval()
-
-        # start = torch.cuda.Event(enable_timing=True)
-        # end = torch.cuda.Event(enable_timing=True)
-
-        # original_times = []
-        # for _ in range(1000):
-        #     torch.cuda.synchronize()
-        #     start.record()
-        #     output = model(input)
-        #     end.record()
-
-        #     torch.cuda.synchronize()
-        #     elapsed_time_ms = start.elapsed_time(end)
-        #     original_times.append(elapsed_time_ms)
-        # print(f"Original: {np.mean(original_times[5:])}")

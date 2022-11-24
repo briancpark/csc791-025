@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import torch
 from torch import nn as nn
+from torch.nn import init as init
 
 
 class RDN(nn.Module):

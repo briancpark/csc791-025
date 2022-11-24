@@ -92,6 +92,12 @@ class WDSR(nn.Module):
             shuf.append(nn.PixelShuffle(upscale_factor))
         self.shuf = nn.Sequential(*shuf)
 
+        self.criterion = nn.L1Loss()
+        self.optimizer = torch.optim.Adam(self.parameters(), 0.001)
+        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            self.optimizer, (20, 25), 0.2
+        )
+
     def forward(self, x):
         if self.temporal_size:
             x = x.view([x.shape[0], -1, x.shape[3], x.shape[4]])
