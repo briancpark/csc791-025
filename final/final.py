@@ -295,26 +295,6 @@ def visualize(upscale_factor):
         f"figures/{model.__class__.__name__}", format="png"
     )
 
-    input = input.to(device)
-    model = model.to(device)
-
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-
-    original_times = []
-    for _ in range(1000):
-        torch.cuda.synchronize()
-        start.record()
-        output = model(input)
-        end.record()
-
-        torch.cuda.synchronize()
-        elapsed_time_ms = start.elapsed_time(end)
-        original_times.append(elapsed_time_ms)
-    print(f"Original: {np.mean(original_times)}")
-
-    from model import RDN
-
     input = torch.randn(1, 1, 300, 300)
     model = RDN(upscale_factor=upscale_factor)
     output = model(input)
@@ -322,24 +302,6 @@ def visualize(upscale_factor):
     make_dot(output, params=dict(list(model.named_parameters()))).render(
         f"figures/{model.__class__.__name__}", format="png"
     )
-
-    input = input.to(device)
-    model = model.to(device)
-
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-
-    original_times = []
-    for _ in range(1000):
-        torch.cuda.synchronize()
-        start.record()
-        output = model(input)
-        end.record()
-
-        torch.cuda.synchronize()
-        elapsed_time_ms = start.elapsed_time(end)
-        original_times.append(elapsed_time_ms)
-    print(f"Original: {np.mean(original_times)}")
 
 
 def quantization(upscale_factor):
@@ -589,19 +551,23 @@ def benchmark(upscale_factor, model_path):
 
 
 def convert_to_onnx(model_path):
+    # Pinning to opset 9, as DepthToSpace is broken in XGen for blocksize != 4
+    opset_version = 9
+
     if not os.path.exists("onnx_models"):
         os.mkdir("onnx_models")
 
     model = torch.load(model_path, map_location=device).cpu()
-    x = torch.randn(1, 1, 300, 300)
+
+    x = torch.randn(1, 3, 300, 300)
     torch.onnx.export(
         model,
         x,
-        f"onnx_models/{model.__class__.__name__}.onnx",
+        f"onnx_models/{model.__class__.__name__}_{opset_version}.onnx",
         do_constant_folding=True,
         input_names=["input"],
         output_names=["output"],
-        opset_version=9,  # XGen supports 11 or 9
+        opset_version=opset_version,  # XGen supports 11 or 9
         export_params=True,
     )
 
@@ -743,3 +709,115 @@ if __name__ == "__main__":
         convert_to_coreml(args.model_path)
     elif args.mode == "tensorrt":
         convert_to_tensorrt(args.model_path)
+    elif args.mode == "quant":
+        from onnxmltools.utils.float16_converter import (
+            convert_float_to_float16_model_path,
+        )
+        from onnxmltools.utils import save_model
+
+        new_onnx_model = convert_float_to_float16_model_path(
+            "onnx_models/SuperResolutionTwitter_9.onnx", keep_io_types=False
+        )
+        save_model(new_onnx_model, "onnx_models/SRTfp16.onnx")
+        # /ocean/projects/cis220070p/bpark1/models/original/4/model_epoch_1000.pt
+    elif args.mode == "tester":
+        from model import SuperResolutionTwitter
+
+        # from model import RDN, WDSR, VDSR
+
+        # BNECHMARK TWITTER
+        input = torch.randn(1, 1, 300, 300).to(device)
+        model = SuperResolutionTwitter(upscale_factor=4).to(device)
+
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+
+        original_times = []
+        for _ in range(1000):
+            torch.cuda.synchronize()
+            start.record()
+            output = model(input)
+            end.record()
+
+            torch.cuda.synchronize()
+            elapsed_time_ms = start.elapsed_time(end)
+            original_times.append(elapsed_time_ms)
+        print(f"Original: {np.mean(original_times[5:])}")
+
+        # # BNECHMARK RDN
+        # model = RDN(upscale_factor=4).to(device)
+
+        # start = torch.cuda.Event(enable_timing=True)
+        # end = torch.cuda.Event(enable_timing=True)
+
+        # original_times = []
+        # for _ in range(1000):
+        #     torch.cuda.synchronize()
+        #     start.record()
+        #     output = model(input)
+        #     end.record()
+
+        #     torch.cuda.synchronize()
+        #     elapsed_time_ms = start.elapsed_time(end)
+        #     original_times.append(elapsed_time_ms)
+        # print(f"Original: {np.mean(original_times[5:])}")
+
+        # # BENCHMARK WDSR
+        # input = torch.randn(1, 3, 300, 300).to(device)
+        # model = WDSR(upscale_factor=4).to(device)
+
+        # start = torch.cuda.Event(enable_timing=True)
+        # end = torch.cuda.Event(enable_timing=True)
+
+        # original_times = []
+        # for _ in range(1000):
+        #     torch.cuda.synchronize()
+        #     start.record()
+        #     output = model(input)
+        #     end.record()
+
+        #     torch.cuda.synchronize()
+        #     elapsed_time_ms = start.elapsed_time(end)
+        #     original_times.append(elapsed_time_ms)
+        # print(f"Original: {np.mean(original_times[5:])}")
+
+        # # BENCHMARK VDSR
+        # input = torch.randn(1, 1, 300, 300).to(device)
+        # model = VDSR().to(device)
+
+        # start = torch.cuda.Event(enable_timing=True)
+        # end = torch.cuda.Event(enable_timing=True)
+
+        # original_times = []
+        # for _ in range(1000):
+        #     torch.cuda.synchronize()
+        #     start.record()
+        #     output = model(input)
+        #     end.record()
+
+        #     torch.cuda.synchronize()
+        #     elapsed_time_ms = start.elapsed_time(end)
+        #     original_times.append(elapsed_time_ms)
+        # print(f"Original: {np.mean(original_times[5:])}")
+
+        # input = torch.randn(1, 3, 300, 300).to(device)
+        # # from model import RLFN_cut
+        # # model = RLFN_cut(in_nc=3, out_nc=3).to(device)
+        # from model import FMEN
+        # model = FMEN().to(device)
+        # model.eval()
+
+        # start = torch.cuda.Event(enable_timing=True)
+        # end = torch.cuda.Event(enable_timing=True)
+
+        # original_times = []
+        # for _ in range(1000):
+        #     torch.cuda.synchronize()
+        #     start.record()
+        #     output = model(input)
+        #     end.record()
+
+        #     torch.cuda.synchronize()
+        #     elapsed_time_ms = start.elapsed_time(end)
+        #     original_times.append(elapsed_time_ms)
+        # print(f"Original: {np.mean(original_times[5:])}")
