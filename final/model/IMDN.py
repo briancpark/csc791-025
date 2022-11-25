@@ -1,6 +1,7 @@
+from collections import OrderedDict
+
 import torch
 import torch.nn as nn
-from collections import OrderedDict
 
 
 def conv_layer(in_channels, out_channels, kernel_size, stride=1, dilation=1, groups=1):

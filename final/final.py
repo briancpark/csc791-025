@@ -20,11 +20,11 @@ from PIL import Image
 from nni.compression.pytorch.pruning import *
 from nni.compression.pytorch.speedup import ModelSpeedup
 from six.moves import urllib
-import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, CenterCrop, Resize
 from torchvision.transforms import ToTensor
 from torchviz import make_dot
+
 from model import (
     FMEN,
     RDN,
@@ -33,7 +33,6 @@ from model import (
     VDSR,
     WDSR,
 )
-
 
 ### Inference Variables
 USE_EXTERNAL_STORAGE = True if os.environ.get("PROJECT") else False
