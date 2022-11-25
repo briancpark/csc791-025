@@ -14,10 +14,10 @@ class SuperResolutionByteDance(nn.Module):
     https://arxiv.org/abs/2205.07514
     """
 
-    def __init__(self, upscale_factor, in_nc=3, out_nc=3, nf=46, mf=48):
+    def __init__(self, upscale_factor, num_channels=1, nf=46, mf=48):
         super(SuperResolutionByteDance, self).__init__()
 
-        self.fea_conv = conv_layer(in_nc, nf, kernel_size=3)
+        self.fea_conv = conv_layer(num_channels, nf, kernel_size=3)
 
         self.B1 = RLFB(in_channels=nf, mid_channel=mf)
         self.B2 = RLFB(in_channels=nf, mid_channel=mf)
@@ -27,7 +27,7 @@ class SuperResolutionByteDance(nn.Module):
         self.LR_conv = conv_layer(nf, nf, kernel_size=3)
 
         upsample_block = pixelshuffle_block
-        self.upsampler = upsample_block(nf, out_nc, upscale_factor=upscale_factor)
+        self.upsampler = upsample_block(nf, num_channels, upscale_factor=upscale_factor)
         self.scale_idx = 0
 
         self.criterion = nn.MSELoss()

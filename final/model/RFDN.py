@@ -217,10 +217,10 @@ def pixelshuffle_block(
 
 
 class RFDN(nn.Module):
-    def __init__(self, in_nc=3, nf=40, num_modules=4, out_nc=3, upscale=4):
+    def __init__(self, upscale_factor, num_channels=1, nf=40, num_modules=4):
         super(RFDN, self).__init__()
 
-        self.fea_conv = conv_layer(in_nc, nf, kernel_size=3)
+        self.fea_conv = conv_layer(num_channels, nf, kernel_size=3)
 
         self.B1 = RFDB(in_channels=nf)
         self.B2 = RFDB(in_channels=nf)
@@ -231,7 +231,7 @@ class RFDN(nn.Module):
         self.LR_conv = conv_layer(nf, nf, kernel_size=3)
 
         upsample_block = pixelshuffle_block
-        self.upsampler = upsample_block(nf, out_nc, upscale_factor=4)
+        self.upsampler = upsample_block(nf, num_channels, upscale_factor=upscale_factor)
         self.scale_idx = 0
 
         self.criterion = nn.L1Loss()

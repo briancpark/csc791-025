@@ -21,7 +21,7 @@ class WDSR(nn.Module):
         upscale_factor,
         temporal_size=None,
         image_mean=0.5,
-        num_channels=3,
+        num_channels=1,
         num_residual_units=32,
         num_blocks=16,
         width_multiplier=4,

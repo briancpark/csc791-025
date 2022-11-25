@@ -122,15 +122,15 @@ class IMDB_plus(nn.Module):
 
 
 class IMDN(nn.Module):
-    def __init__(self, in_nc, nf, nb, out_nc):
+    def __init__(self, upscale_factor, num_channels=1, nf=36, nb=8):
         super(IMDN, self).__init__()
 
-        fea_conv = conv_layer(in_nc, nf, kernel_size=3)
+        fea_conv = conv_layer(num_channels, nf, kernel_size=3)
         rb_blocks = [IMDB_plus(nf) for _ in range(nb)]
         LR_conv = conv_layer(nf, nf, kernel_size=3)
 
         upsample_block = pixelshuffle_block
-        upsampler = upsample_block(nf, out_nc, upscale_factor=4)
+        upsampler = upsample_block(nf, num_channels, upscale_factor=upscale_factor)
 
         self.FEM = sequential(fea_conv, ShortcutBlock(sequential(*rb_blocks, LR_conv)))
 

@@ -16,6 +16,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data as data
+import matplotlib.pyplot as plt
+from torchvision.io import read_image
+from torchvision.utils import save_image
+from torchvision.transforms.functional import InterpolationMode
 from PIL import Image
 from nni.compression.pytorch.pruning import *
 from nni.compression.pytorch.speedup import ModelSpeedup
@@ -37,15 +41,16 @@ from model import (
     RFDN,
 )
 
+# ycbcr optimization on or off
 model_config = {
-    "FMEN": 3,
-    "RDN": 3,
-    "SuperResolutionByteDance": 3,
-    "SuperResolutionTwitter": 3,
-    "VDSR": 3,
-    "WDSR": 3,
-    "IMDN": 3,
-    "RFDN": 3,
+    "FMEN": False,
+    "RDN": True,
+    "SuperResolutionByteDance": True,
+    "SuperResolutionTwitter": True,
+    "VDSR": True,
+    "WDSR": True,
+    "IMDN": True,
+    "RFDN": True,
 }
 
 ### Inference Variables
@@ -66,14 +71,67 @@ if not os.path.exists("logs"):
     os.mkdir("logs")
 
 
+### COLOR CONVERSIONS
+"""
+    Y  = R *  0.29900 + G *  0.58700 + B *  0.11400
+    Cb = R * -0.16874 + G * -0.33126 + B *  0.50000 + 128
+    Cr = R *  0.50000 + G * -0.41869 + B * -0.08131 + 128
+    
+    R  = Y +                       + (Cr - 128) *  1.40200
+    G  = Y + (Cb - 128) * -0.34414 + (Cr - 128) * -0.71414
+    B  = Y + (Cb - 128) *  1.77200
+    
+    SOURCE: https://github.com/python-pillow/Pillow/blob/main/src/libImaging/ConvertYCbCr.c
+"""
+
+
+def rgb_to_ycbcr(image):
+    with torch.no_grad():
+        if image.max() < 1.0:
+            image = image * 255.0
+
+        r = image[..., 0, :, :]
+        g = image[..., 1, :, :]
+        b = image[..., 2, :, :]
+
+        delta = 128.0
+        y = (r * 0.29900) + (g * 0.58700) + (b * 0.11400)
+        cb = (r * -0.16874) + (g * -0.33126) + (b * 0.50000) + delta
+        cr = (r * 0.50000) + (g * -0.41869) + (b * -0.08131) + delta
+        out = torch.stack([y, cb, cr], -3)
+
+        out = out / 255.0
+        return out
+
+
+def ycbcr_to_rgb(image):
+    with torch.no_grad():
+        if image.max() < 1:
+            image = image * 255.0
+
+        y = image[..., 0, :, :]
+        cb = image[..., 1, :, :]
+        cr = image[..., 2, :, :]
+
+        delta = 128.0
+        r = y + (cr - delta) * 1.40200
+        g = y + ((cb - delta) * -0.34414) + ((cr - delta) * -0.71414)
+        b = y + (cb - delta) * 1.77200
+        out = torch.stack([r, g, b], -3)
+        return out
+
+
 def is_image_file(filename):
     return any(filename.endswith(extension) for extension in [".png", ".jpg", ".jpeg"])
 
 
 def load_img(filepath, ycbcr=True):
     if ycbcr:
-        img = Image.open(filepath).convert("YCbCr")
-        y, _, _ = img.split()
+        # img = Image.open(filepath).convert("YCbCr")
+        # y, _, _ = img.split()
+        # return y
+        img = read_image(filepath)
+        y = rgb_to_ycbcr(img)[0:1]
         return y
 
     else:
@@ -96,7 +154,10 @@ class DatasetFromFolder(data.Dataset):
 
     def __getitem__(self, index):
         input = load_img(self.image_filenames[index], ycbcr=self.ycbcr)
-        target = input.copy()
+
+        # target = input.copy()
+        target = input.clone()
+
         if self.input_transform:
             input = self.input_transform(input)
         if self.target_transform:
@@ -141,7 +202,7 @@ def input_transform(crop_size, upscale_factor):
         [
             CenterCrop(crop_size),
             Resize(crop_size // upscale_factor),
-            ToTensor(),
+            # ToTensor(),
         ]
     )
 
@@ -150,7 +211,7 @@ def target_transform(crop_size):
     return Compose(
         [
             CenterCrop(crop_size),
-            ToTensor(),
+            # ToTensor(),
         ]
     )
 
@@ -247,17 +308,58 @@ def inference(model_path, upscale_factor, sparsity, pruner="original"):
     else:
         output_filename = f"figures/out_{upscale_factor}_{pruner}_{sparsity}.png"
 
-    ycbcr = False
     model = torch.load(model_path, map_location=device)
+    ycbcr = model_config[model.__class__.__name__]
+
     if ycbcr:
+        img = read_image(input_image).to(device)
+        ycbcr_img = rgb_to_ycbcr(img)
+        input = ycbcr_img[0].unsqueeze(0)  # y is 0 <  xxx < 1
+        cb = ycbcr_img[1].unsqueeze(0)
+        cr = ycbcr_img[2].unsqueeze(0)
+
+        tr = Resize(
+            (img.shape[-2] * upscale_factor, img.shape[-1] * upscale_factor),
+            interpolation=InterpolationMode.BICUBIC,
+        )
+
+        out = model(input)
+        out_img_y = out * 255.0
+        out_img_y = out_img_y.clip(0, 255)
+
+        out_img_cb = tr(cb)
+        out_img_cr = tr(cr)
+
+        out_img_cb = out_img_cb * 255.0
+        out_img_cb = out_img_cb.clip(0, 255)
+        out_img_cr = out_img_cr * 255.0
+        out_img_cr = out_img_cr.clip(0, 255)
+
+        out = torch.stack([out_img_y, out_img_cb, out_img_cr], -3)
+        out = ycbcr_to_rgb(out)
+        out = out.clip(0, 255)
+
+        out_img = out.detach().cpu().numpy()[0]
+        print(out_img)
+        print(out_img.shape)
+        out_img = np.transpose(out_img, (1, 2, 0))
+        out_img = np.uint8(out_img)
+        out_img = Image.fromarray(out_img, mode="RGB")
+        out_img.save(output_filename)
+
+        # save_image(out, output_filename)
+        print("output image saved to", output_filename)
+        exit()
+
+        ### COMMENT OUT
         img = Image.open(input_image).convert("YCbCr")
         y, cb, cr = img.split()
-
         img_to_tensor = ToTensor()
-        input = img_to_tensor(y).view(1, -1, y.size[1], y.size[0])
+        input = img_to_tensor(y).view(1, -1, img.size[1], img.size[0])
 
-        model = model.to(device)
         input = input.to(device)
+
+        out = model(input)
 
         out = model(input)
         out = out.cpu()
@@ -320,44 +422,31 @@ def training(
     batch_size,
     test_batch_size,
     epochs,
-    lr,
-    step_size,
-    gamma,
     logging,
     model_name,
 ):
     if model_name == "FMEN":  # Gradient error
         model = FMEN(upscale_factor=upscale_factor).to(device)  # DOESN'T WORK
-        ycbcr = False
     elif model_name == "VDSR":
         model = VDSR().to(device)  # DOESN'T WORK
-        ycbcr = True
 
     elif model_name == "RFDN":
-        model = RFDN(
-            in_nc=3, nf=40, num_modules=4, out_nc=3, upscale=upscale_factor
-        ).to(device)
-        ycbcr = False
+        model = RFDN(upscale_factor=upscale_factor).to(device)
     elif model_name == "IMDN":
-        model = IMDN(in_nc=3, nf=36, nb=8, out_nc=3).to(device)
-        ycbcr = False
+        model = IMDN(upscale_factor=upscale_factor).to(device)
     elif model_name == "RDN":
-        model = RDN(upscale_factor=upscale_factor, channel=3).to(device)
-        ycbcr = False
+        model = RDN(upscale_factor=upscale_factor).to(device)
     elif model_name == "SuperResolutionByteDance":
-        model = SuperResolutionByteDance(
-            upscale_factor=upscale_factor, in_nc=3, out_nc=3
-        ).to(device)
-        ycbcr = False
+        model = SuperResolutionByteDance(upscale_factor=upscale_factor).to(device)
     elif model_name == "SuperResolutionTwitter":
         model = SuperResolutionTwitter(upscale_factor=upscale_factor).to(device)
-        ycbcr = True
     elif model_name == "WDSR":  # XGen baseline model
-        model = WDSR(upscale_factor=upscale_factor, num_channels=3).to(device)
-        ycbcr = False
+        model = WDSR(upscale_factor=upscale_factor).to(device)
     else:
         print("Invalid model name")
         return
+
+    ycbcr = model_config[model_name]
 
     train_set = get_training_set(upscale_factor, ycbcr)
     test_set = get_test_set(upscale_factor, ycbcr)
@@ -403,16 +492,19 @@ def training(
 
 
 def visualize(upscale_factor):
+    models = [
+        FMEN,
+        RDN,
+        SuperResolutionByteDance,
+        SuperResolutionTwitter,
+        VDSR,
+        WDSR,
+        IMDN,
+        RFDN,
+    ]
+
     model = SuperResolutionTwitter(upscale_factor=upscale_factor)
     input = torch.randn(1, 1, 300, 300)
-    output = model(input)
-
-    make_dot(output, params=dict(list(model.named_parameters()))).render(
-        f"figures/{model.__class__.__name__}", format="png"
-    )
-
-    input = torch.randn(1, 1, 300, 300)
-    model = RDN(upscale_factor=upscale_factor)
     output = model(input)
 
     make_dot(output, params=dict(list(model.named_parameters()))).render(
@@ -862,9 +954,6 @@ if __name__ == "__main__":
             args.batch_size,
             args.test_batch_size,
             args.epochs,
-            args.lr,
-            args.step_size,
-            args.gamma,
             args.logging,
             args.model_name,
         )
@@ -878,9 +967,6 @@ if __name__ == "__main__":
             args.batch_size,
             args.test_batch_size,
             args.epochs,
-            args.lr,
-            args.step_size,
-            args.gamma,
             args.logging,
             args.model_name,
         )
