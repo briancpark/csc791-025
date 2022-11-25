@@ -24,6 +24,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, CenterCrop, Resize
 from torchvision.transforms import ToTensor
 from torchviz import make_dot
+from tqdm import tqdm
 
 from model import (
     FMEN,
@@ -32,7 +33,20 @@ from model import (
     SuperResolutionTwitter,
     VDSR,
     WDSR,
+    IMDN,
+    RFDN,
 )
+
+model_config = {
+    "FMEN": 3,
+    "RDN": 3,
+    "SuperResolutionByteDance": 3,
+    "SuperResolutionTwitter": 3,
+    "VDSR": 3,
+    "WDSR": 3,
+    "IMDN": 3,
+    "RFDN": 3,
+}
 
 ### Inference Variables
 USE_EXTERNAL_STORAGE = True if os.environ.get("PROJECT") else False
@@ -320,15 +334,11 @@ def training(
         ycbcr = True
 
     elif model_name == "RFDN":
-        from model import RFDN
-
         model = RFDN(
             in_nc=3, nf=40, num_modules=4, out_nc=3, upscale=upscale_factor
         ).to(device)
         ycbcr = False
     elif model_name == "IMDN":
-        from model import IMDN
-
         model = IMDN(in_nc=3, nf=36, nb=8, out_nc=3).to(device)
         ycbcr = False
     elif model_name == "RDN":
@@ -607,7 +617,7 @@ def benchmark(upscale_factor, model_path):
     for _ in range(100):
         A @ B
 
-    ycbcr = False  # TODO:(bcp) add ycbcr option
+    ycbcr = True  # TODO:(bcp) add ycbcr option
     channels = 1 if ycbcr else 3
 
     train_set = get_training_set(upscale_factor, ycbcr)
@@ -655,6 +665,8 @@ def benchmark(upscale_factor, model_path):
 
                 inference_times.append(tok - tik)
 
+    inference_times = np.array(inference_times[5:])
+
     print("Benchmark Dataset")
     print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
     print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
@@ -689,9 +701,46 @@ def benchmark(upscale_factor, model_path):
             _ = model(input)
             tok = time.perf_counter()
             inference_times.append(tok - tik)
+
+    inference_times = np.array(inference_times[5:])
+
     print(f"Benchmark Video from {low_resolution_y}p to {high_resolution_y}p")
     print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
     print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
+
+
+def demo(upscale_factor, model_path, frame_path):
+    ycbcr = True  # TODO:(bcp) add ycbcr option
+    channels = 1 if ycbcr else 3
+
+    model = torch.load(model_path, map_location=device)
+
+    sr_frame_path = frame_path + "_sr"
+
+    for frame in tqdm(os.listdir(frame_path)):
+        fp = os.path.join(frame_path, frame)
+
+        img = Image.open(fp).convert("YCbCr")
+        y, cb, cr = img.split()
+
+        img_to_tensor = ToTensor()
+        input = img_to_tensor(y).view(1, -1, y.size[1], y.size[0])
+        input = input.to(device)
+
+        out = model(input)
+        out = out.cpu()
+        out_img_y = out[0].detach().numpy()
+        out_img_y *= 255.0
+        out_img_y = out_img_y.clip(0, 255)
+        out_img_y = Image.fromarray(np.uint8(out_img_y[0]), mode="L")
+
+        out_img_cb = cb.resize(out_img_y.size, Image.Resampling.BICUBIC)
+        out_img_cr = cr.resize(out_img_y.size, Image.Resampling.BICUBIC)
+        out_img = Image.merge("YCbCr", [out_img_y, out_img_cb, out_img_cr]).convert(
+            "RGB"
+        )
+
+        out_img.save(sr_frame_path + "/" + frame)
 
 
 def convert_to_onnx(model_path, channels=3):
@@ -800,6 +849,11 @@ if __name__ == "__main__":
     parser.add_argument("--pruner", type=str, default="original")
     parser.add_argument("--channels", type=int, default=3)
     parser.add_argument("--model_name", type=str, default="SuperResolutionTwitter")
+    parser.add_argument(
+        "--frame_path",
+        type=str,
+        default="/ocean/projects/cis220070p/bpark1/demo/frames/macross",
+    )
 
     args = parser.parse_args()
     if args.mode == "all":
@@ -852,6 +906,8 @@ if __name__ == "__main__":
         quantization(args)
     elif args.mode == "benchmark":
         benchmark(args.upscale_factor, args.model_path)
+    elif args.mode == "demo":
+        demo(args.upscale_factor, args.model_path, args.frame_path)
     elif args.mode == "onnx":
         convert_to_onnx(args.model_path, channels=args.channels)
     elif args.mode == "coreml":
