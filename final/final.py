@@ -64,7 +64,7 @@ def load_img(filepath, ycbcr=True):
         return y
 
     else:
-        img = Image.open(filepath)
+        img = Image.open(filepath).convert("RGB")
         return img
 
 
@@ -234,29 +234,72 @@ def inference(model_path, upscale_factor, sparsity, pruner="original"):
     else:
         output_filename = f"figures/out_{upscale_factor}_{pruner}_{sparsity}.png"
 
-    img = Image.open(input_image).convert("YCbCr")
-    y, cb, cr = img.split()
+    ycbcr = False
+    model = torch.load(model_path, map_location=device)
+    if ycbcr:
+        img = Image.open(input_image).convert("YCbCr")
+        y, cb, cr = img.split()
 
-    model = torch.load(model_path)
-    img_to_tensor = ToTensor()
-    input = img_to_tensor(y).view(1, -1, y.size[1], y.size[0])
+        img_to_tensor = ToTensor()
+        input = img_to_tensor(y).view(1, -1, y.size[1], y.size[0])
 
-    model = model.to(device)
-    input = input.to(device)
+        model = model.to(device)
+        input = input.to(device)
 
-    out = model(input)
-    out = out.cpu()
-    out_img_y = out[0].detach().numpy()
-    out_img_y *= 255.0
-    out_img_y = out_img_y.clip(0, 255)
-    out_img_y = Image.fromarray(np.uint8(out_img_y[0]), mode="L")
+        out = model(input)
+        out = out.cpu()
+        out_img_y = out[0].detach().numpy()
+        out_img_y *= 255.0
+        out_img_y = out_img_y.clip(0, 255)
+        out_img_y = Image.fromarray(np.uint8(out_img_y[0]), mode="L")
 
-    out_img_cb = cb.resize(out_img_y.size, Image.Resampling.BICUBIC)
-    out_img_cr = cr.resize(out_img_y.size, Image.Resampling.BICUBIC)
-    out_img = Image.merge("YCbCr", [out_img_y, out_img_cb, out_img_cr]).convert("RGB")
+        out_img_cb = cb.resize(out_img_y.size, Image.Resampling.BICUBIC)
+        out_img_cr = cr.resize(out_img_y.size, Image.Resampling.BICUBIC)
+        out_img = Image.merge("YCbCr", [out_img_y, out_img_cb, out_img_cr]).convert(
+            "RGB"
+        )
 
-    out_img.save(output_filename)
-    print("output image saved to ", output_filename)
+        out_img.save(output_filename)
+        print("output image saved to", output_filename)
+    else:
+        # train_set = get_training_set(upscale_factor, ycbcr=ycbcr)
+        # test_set = get_test_set(upscale_factor, ycbcr=ycbcr)
+
+        # training_data_loader = DataLoader(
+        #     dataset=train_set,
+        #     batch_size=1,
+        #     shuffle=False,
+        # )
+
+        # testing_data_loader = DataLoader(
+        #     dataset=test_set,
+        #     batch_size=1,
+        #     shuffle=False,
+        # )
+
+        # input = training_data_loader.__iter__().__next__()[0][:1]
+        # print(input.shape)
+
+        ### COMMENT OUT
+        img = Image.open(input_image)
+        img_to_tensor = ToTensor()
+        input = img_to_tensor(img).view(1, -1, img.size[1], img.size[0])
+        ### COMMENT OUT
+
+        input = input.to(device)
+
+        out = model(input)
+
+        # post process
+        out = out.cpu()
+        out_img = out[0].detach().numpy()
+        out_img *= 255.0
+        out_img = out_img.clip(0, 255)
+        out_img = np.transpose(out_img, (1, 2, 0))
+        out_img = np.uint8(out_img)
+        out_img = Image.fromarray(out_img, mode="RGB")
+        out_img.save(output_filename)
+        print("output image saved to", output_filename)
 
 
 def training(
@@ -270,31 +313,38 @@ def training(
     logging,
     model_name,
 ):
-    if model_name == "FMEN":
-        model = FMEN(upscale_factor=upscale_factor).to(device)  # works 3
+    if model_name == "FMEN":  # Gradient error
+        model = FMEN(upscale_factor=upscale_factor).to(device)  # DOESN'T WORK
+        ycbcr = False
+    elif model_name == "VDSR":
+        model = VDSR().to(device)  # DOESN'T WORK
+        ycbcr = True
+
+    elif model_name == "RFDN":
+        from model import RFDN
+
+        model = RFDN(
+            in_nc=3, nf=40, num_modules=4, out_nc=3, upscale=upscale_factor
+        ).to(device)
+        ycbcr = False
+    elif model_name == "IMDN":
+        from model import IMDN
+
+        model = IMDN(in_nc=3, nf=36, nb=8, out_nc=3).to(device)
         ycbcr = False
     elif model_name == "RDN":
-        model = RDN(upscale_factor=upscale_factor, channel=3).to(device)  # works 3 1
+        model = RDN(upscale_factor=upscale_factor, channel=3).to(device)
         ycbcr = False
     elif model_name == "SuperResolutionByteDance":
         model = SuperResolutionByteDance(
             upscale_factor=upscale_factor, in_nc=3, out_nc=3
-        ).to(
-            device
-        )  # works 3 1
+        ).to(device)
         ycbcr = False
     elif model_name == "SuperResolutionTwitter":
-        model = SuperResolutionTwitter(upscale_factor=upscale_factor).to(
-            device
-        )  # works 1
+        model = SuperResolutionTwitter(upscale_factor=upscale_factor).to(device)
         ycbcr = True
-    elif model_name == "VDSR":
-        model = VDSR().to(device)  # doesn't work with 1 or 3
-        ycbcr = False
-    elif model_name == "WDSR":
-        model = WDSR(upscale_factor=upscale_factor, num_channels=3).to(
-            device
-        )  # works 3 1
+    elif model_name == "WDSR":  # XGen baseline model
+        model = WDSR(upscale_factor=upscale_factor, num_channels=3).to(device)
         ycbcr = False
     else:
         print("Invalid model name")
@@ -558,8 +608,11 @@ def benchmark(upscale_factor, model_path):
     for _ in range(100):
         A @ B
 
-    train_set = get_training_set(upscale_factor)
-    test_set = get_test_set(upscale_factor)
+    ycbcr = False  # TODO:(bcp) add ycbcr option
+    channels = 1 if ycbcr else 3
+
+    train_set = get_training_set(upscale_factor, ycbcr)
+    test_set = get_test_set(upscale_factor, ycbcr)
 
     training_data_loader = DataLoader(
         dataset=train_set,
@@ -601,8 +654,43 @@ def benchmark(upscale_factor, model_path):
                 _ = model(data)
                 tok = time.perf_counter()
 
-            inference_times.append(tok - tik)
+                inference_times.append(tok - tik)
 
+    print("Benchmark Dataset")
+    print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
+    print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
+
+    # Benchmark Video from 360p to 1440p
+    high_resolution_x, high_resolution_y = 2560, 1440
+    low_resolution_x, low_resolution_y = (
+        high_resolution_x // upscale_factor,
+        high_resolution_y // upscale_factor,
+    )
+
+    input = torch.randn(1, channels, low_resolution_x, low_resolution_y).to(device)
+    inference_times = []
+
+    if torch.cuda.is_available():
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+
+        for _ in range(1000):
+
+            start.record()
+            _ = model(input)
+            end.record()
+
+            torch.cuda.synchronize()
+
+            inference_times.append(start.elapsed_time(end) / 1000)
+    else:
+        for _ in range(1000):
+
+            tik = time.perf_counter()
+            _ = model(input)
+            tok = time.perf_counter()
+            inference_times.append(tok - tik)
+    print(f"Benchmark Video from {low_resolution_y}p to {high_resolution_y}p")
     print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
     print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
 
@@ -616,7 +704,7 @@ def convert_to_onnx(model_path, channels=3):
 
     model = torch.load(model_path, map_location=device).cpu()
 
-    input = torch.randn(1, channels, 300, 300)
+    input = torch.randn(1, channels, 640, 360)
 
     torch.onnx.export(
         model,
