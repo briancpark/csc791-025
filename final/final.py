@@ -323,78 +323,114 @@ def super_resolution(model, img, upscale_factor):
         # input MUST be formatted as size (1, 1, H, W)
         out = model(input)
 
-        # TODO: This could be cleaned up
         out_img_y = out * 255.0
         out_img_y = out_img_y.clip(0, 255)
+
         out_img_cb = out_img_cb * 255.0
         out_img_cb = out_img_cb.clip(0, 255).unsqueeze(0)
+
         out_img_cr = out_img_cr * 255.0
         out_img_cr = out_img_cr.clip(0, 255).unsqueeze(0)
 
-        out = torch.stack([out_img_y, out_img_cb, out_img_cr], -3)
-        out = ycbcr_to_rgb(out)
-        out = out.clip(0, 255).squeeze(0)
+        output = torch.stack([out_img_y, out_img_cb, out_img_cr], -3)
+        output = ycbcr_to_rgb(output)
 
-        out = out.type(torch.uint8)
-        out = out / 255.0
-        return out
+        output = output.clip(0, 255).squeeze(0)
+
+        output = output.type(torch.uint8)
+        output = output / 255.0
+        return output
+    else:
+        # TODO: Implement for RGB
+        pass
 
 
 def inference(model_path, upscale_factor, sparsity, pruner="original"):
-    # TODO (bcp): Parameterize this
-    input_image = "data/BSDS300/images/test/37073.jpg"
+    # This performs inference on the test dataset
 
     model = torch.load(model_path, map_location=device)
     ycbcr = model_config[model.__class__.__name__]
 
-    channels = 1 if ycbcr else 3
+    test_dir = "data/BSDS300/images/test"
 
-    train_set = get_training_set(upscale_factor, ycbcr)
-    test_set = get_test_set(upscale_factor, ycbcr)
-
-    training_data_loader = DataLoader(
-        dataset=train_set,
-        batch_size=1,
-        shuffle=False,
-    )
-
-    testing_data_loader = DataLoader(
-        dataset=test_set,
-        batch_size=1,
-        shuffle=False,
-    )
-
+    # Create directories and set filename
     if pruner == "original":
-        output_filename = (
-            f"figures/out_{model.__class__.__name__}_{upscale_factor}_{pruner}.png"
-        )
+        if USE_EXTERNAL_STORAGE:
+            PROJECT_DIR = os.environ.get("PROJECT")
+            os.makedirs(
+                "{}/results/{}/{}/{}".format(
+                    PROJECT_DIR, model.__class__.__name__, pruner, upscale_factor
+                ),
+                exist_ok=True,
+            )
+            output_dir = "{}/results/{}/{}/{}".format(
+                PROJECT_DIR, model.__class__.__name__, pruner, upscale_factor
+            )
+        else:
+            os.makedirs(
+                "results/{}/{}/{}".format(
+                    model.__class__.__name__, pruner, upscale_factor
+                ),
+                exist_ok=True,
+            )
+            output_dir = "results/{}/{}/{}".format(
+                model.__class__.__name__, pruner, upscale_factor
+            )
     else:
-        output_filename = f"figures/out_{model.__class__.__name__}_{upscale_factor}_{pruner}_{sparsity}.png"
+        if USE_EXTERNAL_STORAGE:
+            PROJECT_DIR = os.environ.get("PROJECT")
+            os.makedirs(
+                "{}/results/{}/{}/{}/{}".format(
+                    PROJECT_DIR,
+                    model.__class__.__name__,
+                    pruner,
+                    upscale_factor,
+                    sparsity,
+                ),
+                exist_ok=True,
+            )
+            output_dir = "{}/results/{}/{}/{}/{}".format(
+                PROJECT_DIR, model.__class__.__name__, pruner, upscale_factor, sparsity
+            )
+        else:
+            os.makedirs(
+                "results/{}/{}/{}/{}".format(
+                    model.__class__.__name__, pruner, upscale_factor, sparsity
+                ),
+                exist_ok=True,
+            )
+            output_dir = "results/{}/{}/{}/{}".format(
+                model.__class__.__name__, pruner, upscale_factor, sparsity
+            )
 
-    if ycbcr:
-        img = read_image(input_image).to(device)
-        out = super_resolution(model, img, upscale_factor)
-        save_image(out, output_filename)
-        print("output image saved to", output_filename)
-    else:
-        img = Image.open(input_image)
-        img_to_tensor = ToTensor()
-        input = img_to_tensor(img).view(1, -1, img.size[1], img.size[0])
+    for img_name in tqdm(os.listdir(test_dir)):
+        filename = os.path.join(test_dir, img_name)
+        output_filename = os.path.join(output_dir, img_name)
 
-        input = input.to(device)
+        if ycbcr:
+            img = read_image(filename).to(device)
+            out = super_resolution(model, img, upscale_factor)
+            save_image(out, output_filename)
+        else:
+            # TODO: clean up this mass
+            img = Image.open(input_image)
+            img_to_tensor = ToTensor()
+            input = img_to_tensor(img).view(1, -1, img.size[1], img.size[0])
 
-        out = model(input)
+            input = input.to(device)
 
-        # post process
-        out = out.cpu()
-        out_img = out[0].detach().numpy()
-        out_img *= 255.0
-        out_img = out_img.clip(0, 255)
-        out_img = np.transpose(out_img, (1, 2, 0))
-        out_img = np.uint8(out_img)
-        out_img = Image.fromarray(out_img, mode="RGB")
-        out_img.save(output_filename)
-        print("output image saved to", output_filename)
+            out = model(input)
+
+            # post process
+            out = out.cpu()
+            out_img = out[0].detach().numpy()
+            out_img *= 255.0
+            out_img = out_img.clip(0, 255)
+            out_img = np.transpose(out_img, (1, 2, 0))
+            out_img = np.uint8(out_img)
+            out_img = Image.fromarray(out_img, mode="RGB")
+            out_img.save(output_filename)
+            print("output image saved to", output_filename)
 
 
 def training(
@@ -986,4 +1022,3 @@ if __name__ == "__main__":
             "onnx_models/SuperResolutionTwitter_9.onnx", keep_io_types=False
         )
         save_model(new_onnx_model, "onnx_models/SRTfp16.onnx")
-        # /ocean/projects/cis220070p/bpark1/models/original/4/model_epoch_1000.pt
