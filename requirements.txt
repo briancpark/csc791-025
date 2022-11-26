@@ -18,8 +18,8 @@ coremltools
 onnxruntime
 onnxruntime-gpu
 torch-tensorrt -f https://github.com/pytorch/TensorRT/releases/download/v1.2.0/torch_tensorrt-1.2.0-cp310-cp310-linux_x86_64.whl
-
-
 onnxmltools
 opencv-python
 basicsr
+youtube-dl
+ffmpeg
