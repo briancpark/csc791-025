@@ -728,7 +728,9 @@ def benchmark(upscale_factor, model_path):
     for _ in range(100):
         A @ B
 
-    ycbcr = True  # TODO:(bcp) add ycbcr option
+    model = torch.load(model_path, map_location=device)
+
+    ycbcr = model_config[model.__class__.__name__]
     channels = 1 if ycbcr else 3
 
     train_set = get_training_set(upscale_factor, ycbcr)
@@ -745,8 +747,6 @@ def benchmark(upscale_factor, model_path):
         batch_size=1,
         shuffle=False,
     )
-
-    model = torch.load(model_path, map_location=device)
 
     inference_times = []
 
@@ -818,6 +818,109 @@ def benchmark(upscale_factor, model_path):
     print(f"Benchmark Video from {low_resolution_y}p to {high_resolution_y}p")
     print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
     print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
+
+    if False:
+        # Run TensorRT benchmark
+        import torch_tensorrt
+
+        trt_ts_module = torch.jit.load(f"tensorrt_models/{model.__class__.__name__}.ts")
+
+        inference_times = []
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+
+        for _ in range(1000):
+
+            start.record()
+            result = trt_ts_module(input)
+            end.record()
+
+            torch.cuda.synchronize()
+
+            inference_times.append(start.elapsed_time(end) / 1000)
+        print(
+            f"TensorRT Benchmark Video from {low_resolution_y}p to {high_resolution_y}p"
+        )
+        print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
+        print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
+
+    # Run ONNX Runtime benchmark
+    if False:
+        import onnxruntime
+
+        providers = [
+            (
+                "CUDAExecutionProvider",
+                {
+                    "device_id": 0,
+                    "arena_extend_strategy": "kNextPowerOfTwo",
+                    "gpu_mem_limit": 2 * 1024 * 1024 * 1024,
+                    "cudnn_conv_algo_search": "EXHAUSTIVE",
+                    "do_copy_in_default_stream": True,
+                },
+            ),
+            "CPUExecutionProvider",
+        ]
+        so = onnxruntime.SessionOptions()
+        so.inter_op_num_threads = 1
+        so.intra_op_num_threads = 1
+
+        ort_session = onnxruntime.InferenceSession(
+            f"onnx_models/{model.__class__.__name__}.onnx",
+            providers=providers,
+            sess_options=so,
+        )
+
+        def to_numpy(tensor):
+            return (
+                tensor.detach().cpu().numpy()
+                if tensor.requires_grad
+                else tensor.cpu().numpy()
+            )
+
+        # compute ONNX Runtime output prediction
+        ort_inputs = {ort_session.get_inputs()[0].name: to_numpy(input)}
+
+        inference_times = []
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+
+        for _ in range(1000):
+
+            start.record()
+            ort_outs = ort_session.run(None, ort_inputs)
+            end.record()
+
+            torch.cuda.synchronize()
+
+            inference_times.append(start.elapsed_time(end) / 1000)
+        print(f"ORT Benchmark Video from {low_resolution_y}p to {high_resolution_y}p")
+        print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
+        print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
+
+    # Run TVM
+    if True:
+        from tvm.driver import tvmc
+
+        package = tvmc.TVMCPackage(
+            package_path=f"tvm_models/{model.__class__.__name__}.tar"
+        )
+
+        inference_times = []
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+
+        for _ in range(1000):
+            start.record()
+            result = tvmc.run(package, device="cuda")
+            end.record()
+
+            torch.cuda.synchronize()
+
+            inference_times.append(start.elapsed_time(end) / 1000)
+        print(f"ORT Benchmark Video from {low_resolution_y}p to {high_resolution_y}p")
+        print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
+        print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
 
 
 def demo(upscale_factor, model_path, frame_path):
@@ -932,6 +1035,31 @@ def convert_to_tensorrt(model_path):
     result = trt_ts_module(input)
 
 
+def convert_to_tvm(model_path):
+    # https://tvm.apache.org/docs/tutorial/tvmc_python.html
+    from tvm.driver import tvmc
+
+    torch_model = torch.load(model_path, map_location=device).cpu()
+    onnx_model_path = f"onnx_models/{torch_model.__class__.__name__}.onnx"
+
+    if not os.path.exists("tvm_models"):
+        os.mkdir("tvm_models")
+
+    model = tvmc.load(onnx_model_path)  # Step 1: Load
+
+    tvmc.tune(
+        model, target="cuda", enable_autoscheduler=True
+    )  # Step 1.5: Optional Tune
+
+    package = tvmc.compile(
+        model,
+        target="cuda",
+        package_path=f"tvm_models/{torch_model.__class__.__name__}.tar",
+    )  # Step 2: Compile
+
+    result = tvmc.run(package, device="cuda")  # Step 3: Run
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", type=str, default="all")
@@ -1012,6 +1140,8 @@ if __name__ == "__main__":
         convert_to_coreml(args.model_path)
     elif args.mode == "tensorrt":
         convert_to_tensorrt(args.model_path)
+    elif args.mode == "tvm":
+        convert_to_tvm(args.model_path)
     elif args.mode == "quant":
         from onnxmltools.utils.float16_converter import (
             convert_float_to_float16_model_path,
