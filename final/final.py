@@ -73,15 +73,15 @@ if not os.path.exists("logs"):
 
 ### COLOR CONVERSIONS
 """
-    Y  = R *  0.29900 + G *  0.58700 + B *  0.11400
-    Cb = R * -0.16874 + G * -0.33126 + B *  0.50000 + 128
-    Cr = R *  0.50000 + G * -0.41869 + B * -0.08131 + 128
-    
-    R  = Y +                       + (Cr - 128) *  1.40200
-    G  = Y + (Cb - 128) * -0.34414 + (Cr - 128) * -0.71414
-    B  = Y + (Cb - 128) *  1.77200
-    
-    SOURCE: https://github.com/python-pillow/Pillow/blob/main/src/libImaging/ConvertYCbCr.c
+Y  = R *  0.29900 + G *  0.58700 + B *  0.11400
+Cb = R * -0.16874 + G * -0.33126 + B *  0.50000 + 128
+Cr = R *  0.50000 + G * -0.41869 + B * -0.08131 + 128
+
+R  = Y +                       + (Cr - 128) *  1.40200
+G  = Y + (Cb - 128) * -0.34414 + (Cr - 128) * -0.71414
+B  = Y + (Cb - 128) *  1.77200
+
+SOURCE: https://github.com/python-pillow/Pillow/blob/main/src/libImaging/ConvertYCbCr.c
 """
 
 
@@ -299,6 +299,45 @@ def checkpoint(epoch, model, upscale_factor, prefix="original"):
     print("Checkpoint saved to {}".format(model_out_path))
 
 
+def super_resolution(model, img, upscale_factor):
+    ycbcr = model_config[model.__class__.__name__]
+
+    if ycbcr:
+        ycbcr_img = rgb_to_ycbcr(img)
+
+        # Deconstruct ycbcr_img
+        input = ycbcr_img[0].unsqueeze(0)
+
+        # Retain Cb and Cr channels for reconstruction later
+        cb = ycbcr_img[1].unsqueeze(0)
+        cr = ycbcr_img[2].unsqueeze(0)
+
+        upscale = Resize(
+            (img.shape[-2] * upscale_factor, img.shape[-1] * upscale_factor),
+            interpolation=InterpolationMode.BICUBIC,
+        )
+        out_img_cb = upscale(cb)
+        out_img_cr = upscale(cr)
+
+        # Upscale Y channel
+        out = model(input)
+
+        out_img_y = out * 255.0
+        out_img_y = out_img_y.clip(0, 255)
+        out_img_cb = out_img_cb * 255.0
+        out_img_cb = out_img_cb.clip(0, 255)
+        out_img_cr = out_img_cr * 255.0
+        out_img_cr = out_img_cr.clip(0, 255)
+
+        out = torch.stack([out_img_y, out_img_cb, out_img_cr], -3)
+        out = ycbcr_to_rgb(out)
+        out = out.clip(0, 255)
+
+        out = out.type(torch.uint8)
+        out = out / 255.0
+        return out
+
+
 def inference(model_path, upscale_factor, sparsity, pruner="original"):
     # TODO (bcp): Parameterize this
     input_image = "data/BSDS300/images/test/16077.jpg"
@@ -313,68 +352,8 @@ def inference(model_path, upscale_factor, sparsity, pruner="original"):
 
     if ycbcr:
         img = read_image(input_image).to(device)
-        ycbcr_img = rgb_to_ycbcr(img)
-        input = ycbcr_img[0].unsqueeze(0)  # y is 0 <  xxx < 1
-        cb = ycbcr_img[1].unsqueeze(0)
-        cr = ycbcr_img[2].unsqueeze(0)
-
-        tr = Resize(
-            (img.shape[-2] * upscale_factor, img.shape[-1] * upscale_factor),
-            interpolation=InterpolationMode.BICUBIC,
-        )
-
-        out = model(input)
-        out_img_y = out * 255.0
-        out_img_y = out_img_y.clip(0, 255)
-
-        out_img_cb = tr(cb)
-        out_img_cr = tr(cr)
-
-        out_img_cb = out_img_cb * 255.0
-        out_img_cb = out_img_cb.clip(0, 255)
-        out_img_cr = out_img_cr * 255.0
-        out_img_cr = out_img_cr.clip(0, 255)
-
-        out = torch.stack([out_img_y, out_img_cb, out_img_cr], -3)
-        out = ycbcr_to_rgb(out)
-        out = out.clip(0, 255)
-
-        out_img = out.detach().cpu().numpy()[0]
-        print(out_img)
-        print(out_img.shape)
-        out_img = np.transpose(out_img, (1, 2, 0))
-        out_img = np.uint8(out_img)
-        out_img = Image.fromarray(out_img, mode="RGB")
-        out_img.save(output_filename)
-
-        # save_image(out, output_filename)
-        print("output image saved to", output_filename)
-        exit()
-
-        ### COMMENT OUT
-        img = Image.open(input_image).convert("YCbCr")
-        y, cb, cr = img.split()
-        img_to_tensor = ToTensor()
-        input = img_to_tensor(y).view(1, -1, img.size[1], img.size[0])
-
-        input = input.to(device)
-
-        out = model(input)
-
-        out = model(input)
-        out = out.cpu()
-        out_img_y = out[0].detach().numpy()
-        out_img_y *= 255.0
-        out_img_y = out_img_y.clip(0, 255)
-        out_img_y = Image.fromarray(np.uint8(out_img_y[0]), mode="L")
-
-        out_img_cb = cb.resize(out_img_y.size, Image.Resampling.BICUBIC)
-        out_img_cr = cr.resize(out_img_y.size, Image.Resampling.BICUBIC)
-        out_img = Image.merge("YCbCr", [out_img_y, out_img_cb, out_img_cr]).convert(
-            "RGB"
-        )
-
-        out_img.save(output_filename)
+        out = super_resolution(model, img, upscale_factor)
+        save_image(out, output_filename)
         print("output image saved to", output_filename)
     else:
         # train_set = get_training_set(upscale_factor, ycbcr=ycbcr)
@@ -809,30 +788,14 @@ def demo(upscale_factor, model_path, frame_path):
 
     sr_frame_path = frame_path + "_sr"
 
+    images = []
+    sr_images = []
+
     for frame in tqdm(os.listdir(frame_path)):
         fp = os.path.join(frame_path, frame)
-
-        img = Image.open(fp).convert("YCbCr")
-        y, cb, cr = img.split()
-
-        img_to_tensor = ToTensor()
-        input = img_to_tensor(y).view(1, -1, y.size[1], y.size[0])
-        input = input.to(device)
-
-        out = model(input)
-        out = out.cpu()
-        out_img_y = out[0].detach().numpy()
-        out_img_y *= 255.0
-        out_img_y = out_img_y.clip(0, 255)
-        out_img_y = Image.fromarray(np.uint8(out_img_y[0]), mode="L")
-
-        out_img_cb = cb.resize(out_img_y.size, Image.Resampling.BICUBIC)
-        out_img_cr = cr.resize(out_img_y.size, Image.Resampling.BICUBIC)
-        out_img = Image.merge("YCbCr", [out_img_y, out_img_cb, out_img_cr]).convert(
-            "RGB"
-        )
-
-        out_img.save(sr_frame_path + "/" + frame)
+        img = read_image(fp).to(device)
+        out = super_resolution(model, img, upscale_factor)
+        save_image(out, sr_frame_path + "/" + frame)
 
 
 def convert_to_onnx(model_path, channels=3):
