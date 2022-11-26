@@ -127,14 +127,11 @@ def is_image_file(filename):
 
 def load_img(filepath, ycbcr=True):
     if ycbcr:
-        # img = Image.open(filepath).convert("YCbCr")
-        # y, _, _ = img.split()
-        # return y
         img = read_image(filepath)
         y = rgb_to_ycbcr(img)[0:1]
         return y
-
     else:
+        # TODO: convert to PyTorch
         img = Image.open(filepath).convert("RGB")
         return img
 
@@ -202,7 +199,6 @@ def input_transform(crop_size, upscale_factor):
         [
             CenterCrop(crop_size),
             Resize(crop_size // upscale_factor),
-            # ToTensor(),
         ]
     )
 
@@ -211,7 +207,6 @@ def target_transform(crop_size):
     return Compose(
         [
             CenterCrop(crop_size),
-            # ToTensor(),
         ]
     )
 
@@ -356,29 +351,9 @@ def inference(model_path, upscale_factor, sparsity, pruner="original"):
         save_image(out, output_filename)
         print("output image saved to", output_filename)
     else:
-        # train_set = get_training_set(upscale_factor, ycbcr=ycbcr)
-        # test_set = get_test_set(upscale_factor, ycbcr=ycbcr)
-
-        # training_data_loader = DataLoader(
-        #     dataset=train_set,
-        #     batch_size=1,
-        #     shuffle=False,
-        # )
-
-        # testing_data_loader = DataLoader(
-        #     dataset=test_set,
-        #     batch_size=1,
-        #     shuffle=False,
-        # )
-
-        # input = training_data_loader.__iter__().__next__()[0][:1]
-        # print(input.shape)
-
-        ### COMMENT OUT
         img = Image.open(input_image)
         img_to_tensor = ToTensor()
         input = img_to_tensor(img).view(1, -1, img.size[1], img.size[0])
-        ### COMMENT OUT
 
         input = input.to(device)
 
@@ -482,13 +457,16 @@ def visualize(upscale_factor):
         RFDN,
     ]
 
-    model = SuperResolutionTwitter(upscale_factor=upscale_factor)
-    input = torch.randn(1, 1, 300, 300)
-    output = model(input)
+    for model in models:
+        model = model(upscale_factor=upscale_factor)
+        ycbcr = model_config[model.__class__.__name__]
+        channels = 1 if ycbcr else 3
+        input = torch.randn(1, channels, 300, 300)
+        output = model(input)
 
-    make_dot(output, params=dict(list(model.named_parameters()))).render(
-        f"figures/{model.__class__.__name__}", format="png"
-    )
+        make_dot(output, params=dict(list(model.named_parameters()))).render(
+            f"figures/{model.__class__.__name__}", format="png"
+        )
 
 
 def quantization(upscale_factor):
@@ -798,7 +776,7 @@ def demo(upscale_factor, model_path, frame_path):
         save_image(out, sr_frame_path + "/" + frame)
 
 
-def convert_to_onnx(model_path, channels=3):
+def convert_to_onnx(model_path):
     # Pinning to opset 9, as DepthToSpace is broken in XGen for blocksize != 4
     opset_version = 9
 
@@ -806,6 +784,9 @@ def convert_to_onnx(model_path, channels=3):
         os.mkdir("onnx_models")
 
     model = torch.load(model_path, map_location=device).cpu()
+
+    ycbcr = model_config[model.__class__.__name__]
+    channels = 1 if ycbcr else 3
 
     input = torch.randn(1, channels, 640, 360)
 
@@ -821,7 +802,7 @@ def convert_to_onnx(model_path, channels=3):
     )
 
 
-def convert_to_coreml(model_path, channels=3):
+def convert_to_coreml(model_path):
     # https://coremltools.readme.io/docs/pytorch-conversion
     import coremltools as ct
 
@@ -831,6 +812,9 @@ def convert_to_coreml(model_path, channels=3):
     torch_model = torch.load(model_path, map_location=device).cpu()
     # Set the model in evaluation mode.
     torch_model.eval()
+
+    ycbcr = model_config[torch_model.__class__.__name__]
+    channels = 1 if ycbcr else 3
 
     # Trace the model with random data.
     input = torch.rand(1, channels, 300, 300)
@@ -849,7 +833,7 @@ def convert_to_coreml(model_path, channels=3):
     model.save(f"coreml_models/{model.__class__.__name__}.mlpackage")
 
 
-def convert_to_tensorrt(model_path, channels=3):
+def convert_to_tensorrt(model_path):
     # https://pytorch.org/TensorRT/getting_started/getting_started_with_python_api.html
     import torch_tensorrt
 
@@ -858,6 +842,9 @@ def convert_to_tensorrt(model_path, channels=3):
 
     # torch module needs to be in eval (not training) mode
     model = torch.load(model_path, map_location=device).cpu()
+
+    ycbcr = model_config[model.__class__.__name__]
+    channels = 1 if ycbcr else 3
 
     inputs = [
         torch_tensorrt.Input(
@@ -958,11 +945,11 @@ if __name__ == "__main__":
     elif args.mode == "demo":
         demo(args.upscale_factor, args.model_path, args.frame_path)
     elif args.mode == "onnx":
-        convert_to_onnx(args.model_path, channels=args.channels)
+        convert_to_onnx(args.model_path)
     elif args.mode == "coreml":
-        convert_to_coreml(args.model_path, channels=args.channels)
+        convert_to_coreml(args.model_path)
     elif args.mode == "tensorrt":
-        convert_to_tensorrt(args.model_path, channels=args.channels)
+        convert_to_tensorrt(args.model_path)
     elif args.mode == "quant":
         from onnxmltools.utils.float16_converter import (
             convert_float_to_float16_model_path,

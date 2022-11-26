@@ -15,7 +15,7 @@ class VDSR(nn.Module):
     https://arxiv.org/abs/1511.04587
     """
 
-    def __init__(self) -> None:
+    def __init__(self, upscale_factor=4) -> None:
         super(VDSR, self).__init__()
         # Upscale factor is determined by test image shape
 
