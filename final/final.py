@@ -297,6 +297,7 @@ def checkpoint(epoch, model, upscale_factor, prefix="original"):
     print("Checkpoint saved to {}".format(model_out_path))
 
 
+# Function helper for inference
 def super_resolution(model, img, upscale_factor):
     ycbcr = model_config[model.__class__.__name__]
 
@@ -318,18 +319,21 @@ def super_resolution(model, img, upscale_factor):
         out_img_cr = upscale(cr)
 
         # Upscale Y channel
+        input = input.unsqueeze(0)
+        # input MUST be formatted as size (1, 1, H, W)
         out = model(input)
 
+        # TODO: This could be cleaned up
         out_img_y = out * 255.0
         out_img_y = out_img_y.clip(0, 255)
         out_img_cb = out_img_cb * 255.0
-        out_img_cb = out_img_cb.clip(0, 255)
+        out_img_cb = out_img_cb.clip(0, 255).unsqueeze(0)
         out_img_cr = out_img_cr * 255.0
-        out_img_cr = out_img_cr.clip(0, 255)
+        out_img_cr = out_img_cr.clip(0, 255).unsqueeze(0)
 
         out = torch.stack([out_img_y, out_img_cb, out_img_cr], -3)
         out = ycbcr_to_rgb(out)
-        out = out.clip(0, 255)
+        out = out.clip(0, 255).squeeze(0)
 
         out = out.type(torch.uint8)
         out = out / 255.0
@@ -343,6 +347,23 @@ def inference(model_path, upscale_factor, sparsity, pruner="original"):
     model = torch.load(model_path, map_location=device)
     ycbcr = model_config[model.__class__.__name__]
 
+    channels = 1 if ycbcr else 3
+
+    train_set = get_training_set(upscale_factor, ycbcr)
+    test_set = get_test_set(upscale_factor, ycbcr)
+
+    training_data_loader = DataLoader(
+        dataset=train_set,
+        batch_size=1,
+        shuffle=False,
+    )
+
+    testing_data_loader = DataLoader(
+        dataset=test_set,
+        batch_size=1,
+        shuffle=False,
+    )
+
     if pruner == "original":
         output_filename = (
             f"figures/out_{model.__class__.__name__}_{upscale_factor}_{pruner}.png"
@@ -351,7 +372,6 @@ def inference(model_path, upscale_factor, sparsity, pruner="original"):
         output_filename = f"figures/out_{model.__class__.__name__}_{upscale_factor}_{pruner}_{sparsity}.png"
 
     if ycbcr:
-        print("Using YCbCr")
         img = read_image(input_image).to(device)
         out = super_resolution(model, img, upscale_factor)
         save_image(out, output_filename)
