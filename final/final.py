@@ -291,8 +291,8 @@ def checkpoint(epoch, model, upscale_factor, prefix="original"):
             PROJECT_DIR, model.__class__.__name__, prefix, upscale_factor, epoch
         )
     else:
-        os.makedirs("models/{}".format(prefix), exist_ok=True)
-        model_out_path = "models/{}/{}model_epoch_{}.pth".format(
+        os.makedirs("models/{}/{}".format(prefix, upscale_factor), exist_ok=True)
+        model_out_path = "models/{}/{}/model_epoch_{}.pth".format(
             prefix, upscale_factor, epoch
         )
     torch.save(model, model_out_path)
