@@ -44,13 +44,24 @@ from model import (
 # ycbcr optimization on or off
 model_config = {
     "FMEN": False,
+    "VDSR": True,
     "RDN": True,
     "SuperResolutionByteDance": True,
     "SuperResolutionTwitter": True,
-    "VDSR": True,
     "WDSR": True,
     "IMDN": True,
     "RFDN": True,
+}
+
+model_prune_config = {
+    "FMEN": [],
+    "VDSR": [],
+    "RDN": [],  # OOM
+    "SuperResolutionByteDance": ["fea_conv", "upsampler.0", "LR_conv"],  # Not working
+    "SuperResolutionTwitter": ["conv2d"],
+    "WDSR": ["body.17", "skip.0", "body.0"],  # Other error
+    "IMDN": ["RM.0"],  # TypeError
+    "RFDN": ["c.0", "LR_conv", "upsampler.0", "fea_conv"],  # mask conflict
 }
 
 ### Inference Variables
@@ -665,7 +676,7 @@ def prune(
 
     config_list = [
         {"sparsity_per_layer": sparsity, "op_types": ["Conv2d"]},
-        # {"exclude": True, "op_names": ["conv4"]},
+        {"exclude": True, "op_names": model_prune_config[model.__class__.__name__]},
     ]
 
     pruner = opt_pruners[pruner](model, config_list)
@@ -819,10 +830,11 @@ def benchmark(upscale_factor, model_path):
     print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
     print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
 
-    if False:
+    if True:
         # Run TensorRT benchmark
         import torch_tensorrt
 
+        input_ = torch.randn(1, 1, 640, 360).to(device)
         trt_ts_module = torch.jit.load(f"tensorrt_models/{model.__class__.__name__}.ts")
 
         inference_times = []
@@ -832,7 +844,7 @@ def benchmark(upscale_factor, model_path):
         for _ in range(1000):
 
             start.record()
-            result = trt_ts_module(input)
+            result = trt_ts_module(input_)
             end.record()
 
             torch.cuda.synchronize()
@@ -845,7 +857,7 @@ def benchmark(upscale_factor, model_path):
         print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
 
     # Run ONNX Runtime benchmark
-    if False:
+    if True:
         import onnxruntime
 
         providers = [
@@ -899,7 +911,7 @@ def benchmark(upscale_factor, model_path):
         print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
 
     # Run TVM
-    if True:
+    if False:
         from tvm.driver import tvmc
 
         package = tvmc.TVMCPackage(
@@ -982,7 +994,7 @@ def convert_to_coreml(model_path):
     channels = 1 if ycbcr else 3
 
     # Trace the model with random data.
-    input = torch.rand(1, channels, 300, 300)
+    input = torch.rand(1, channels, 640, 360)
     traced_model = torch.jit.trace(torch_model, input)
     out = traced_model(input)
 
@@ -1013,9 +1025,9 @@ def convert_to_tensorrt(model_path):
 
     inputs = [
         torch_tensorrt.Input(
-            min_shape=[1, channels, 300, 300],
-            opt_shape=[1, channels, 300, 300],
-            max_shape=[1, channels, 300, 300],
+            min_shape=[1, channels, 640, 360],
+            opt_shape=[1, channels, 640, 360],
+            max_shape=[1, channels, 640, 360],
             dtype=torch.float,  # torch.half
         )
     ]
@@ -1025,7 +1037,7 @@ def convert_to_tensorrt(model_path):
         model, inputs=inputs, enabled_precisions=enabled_precisions
     )
 
-    input = torch.randn(1, channels, 300, 300).to(device)
+    input = torch.randn(1, channels, 640, 360).to(device)
     result = trt_ts_module(input)
     torch.jit.save(trt_ts_module, f"tensorrt_models/{model.__class__.__name__}.ts")
 
