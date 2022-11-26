@@ -338,17 +338,20 @@ def super_resolution(model, img, upscale_factor):
 
 def inference(model_path, upscale_factor, sparsity, pruner="original"):
     # TODO (bcp): Parameterize this
-    input_image = "data/BSDS300/images/test/16077.jpg"
-    # input_image = "data/BSDS300/images/test/385039.jpg"
-    if pruner == "original":
-        output_filename = f"figures/out_{upscale_factor}_{pruner}.png"
-    else:
-        output_filename = f"figures/out_{upscale_factor}_{pruner}_{sparsity}.png"
+    input_image = "data/BSDS300/images/test/37073.jpg"
 
     model = torch.load(model_path, map_location=device)
     ycbcr = model_config[model.__class__.__name__]
 
+    if pruner == "original":
+        output_filename = (
+            f"figures/out_{model.__class__.__name__}_{upscale_factor}_{pruner}.png"
+        )
+    else:
+        output_filename = f"figures/out_{model.__class__.__name__}_{upscale_factor}_{pruner}_{sparsity}.png"
+
     if ycbcr:
+        print("Using YCbCr")
         img = read_image(input_image).to(device)
         out = super_resolution(model, img, upscale_factor)
         save_image(out, output_filename)
