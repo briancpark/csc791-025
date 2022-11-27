@@ -58,7 +58,7 @@ model_prune_config = {
     "VDSR": [],
     "RDN": [],  # OOM
     "SuperResolutionByteDance": ["fea_conv", "upsampler.0", "LR_conv"],  # Not working
-    "SuperResolutionTwitter": ["conv2d"],
+    "SuperResolutionTwitter": ["conv4"],
     "WDSR": ["body.17", "skip.0", "body.0"],  # Other error
     "IMDN": ["RM.0"],  # TypeError
     "RFDN": ["c.0", "LR_conv", "upsampler.0", "fea_conv"],  # mask conflict
@@ -284,26 +284,60 @@ def test(data_loader, model, criterion):
     return avg_psnr / len(data_loader)
 
 
-def checkpoint(epoch, model, upscale_factor, prefix="original"):
-    if USE_EXTERNAL_STORAGE:
-        PROJECT_DIR = os.environ.get("PROJECT")
-        os.makedirs(
-            "{}/models/{}/{}/{}".format(
-                PROJECT_DIR, model.__class__.__name__, prefix, upscale_factor
-            ),
-            exist_ok=True,
-        )
-        model_out_path = "{}/models/{}/{}/{}/model_epoch_{}.pth".format(
-            PROJECT_DIR, model.__class__.__name__, prefix, upscale_factor, epoch
-        )
+def checkpoint(epoch, model, upscale_factor, prefix="original", sparsity=0):
+    if sparsity:
+        if USE_EXTERNAL_STORAGE:
+            PROJECT_DIR = os.environ.get("PROJECT")
+            os.makedirs(
+                "{}/models/{}/{}/{}/{}".format(
+                    PROJECT_DIR,
+                    model.__class__.__name__,
+                    prefix,
+                    upscale_factor,
+                    sparsity,
+                ),
+                exist_ok=True,
+            )
+            model_out_path = "{}/models/{}/{}/{}/{}/model_epoch_{}.pth".format(
+                PROJECT_DIR,
+                model.__class__.__name__,
+                prefix,
+                upscale_factor,
+                sparsity,
+                epoch,
+            )
+        else:
+            os.makedirs(
+                "models/{}/{}/{}/{}".format(
+                    model.__class__.__name__, prefix, upscale_factor, sparsity
+                ),
+                exist_ok=True,
+            )
+            model_out_path = "models/{}/{}/{}/{}/model_epoch_{}.pth".format(
+                model.__class__.__name__, prefix, upscale_factor, sparsity, epoch
+            )
     else:
-        os.makedirs(
-            "models/{}/{}/{}".format(model.__class__.__name__, prefix, upscale_factor),
-            exist_ok=True,
-        )
-        model_out_path = "models/{}/{}/{}/model_epoch_{}.pth".format(
-            model.__class__.__name__, prefix, upscale_factor, epoch
-        )
+        if USE_EXTERNAL_STORAGE:
+            PROJECT_DIR = os.environ.get("PROJECT")
+            os.makedirs(
+                "{}/models/{}/{}/{}".format(
+                    PROJECT_DIR, model.__class__.__name__, prefix, upscale_factor
+                ),
+                exist_ok=True,
+            )
+            model_out_path = "{}/models/{}/{}/{}/model_epoch_{}.pth".format(
+                PROJECT_DIR, model.__class__.__name__, prefix, upscale_factor, epoch
+            )
+        else:
+            os.makedirs(
+                "models/{}/{}/{}".format(
+                    model.__class__.__name__, prefix, upscale_factor
+                ),
+                exist_ok=True,
+            )
+            model_out_path = "models/{}/{}/{}/model_epoch_{}.pth".format(
+                model.__class__.__name__, prefix, upscale_factor, epoch
+            )
     torch.save(model, model_out_path)
     print("Checkpoint saved to {}".format(model_out_path))
 
@@ -413,6 +447,10 @@ def inference(model_path, upscale_factor, sparsity, pruner="original"):
             output_dir = "results/{}/{}/{}/{}".format(
                 model.__class__.__name__, pruner, upscale_factor, sparsity
             )
+
+    if sparsity:
+        output_dir = output_dir + "/sparsity_{}".format(sparsity)
+        os.makedirs(output_dir, exist_ok=True)
 
     for img_name in tqdm(os.listdir(test_dir)):
         filename = os.path.join(test_dir, img_name)
@@ -720,7 +758,13 @@ def prune(
         train_loss = train(training_data_loader, model, criterion, optimizer, epoch)
         train_psnr = test(training_data_loader, model, criterion)
         test_psnr = test(testing_data_loader, model, criterion)
-        checkpoint(epoch, model, upscale_factor, prefix=pruner.__class__.__name__)
+        checkpoint(
+            epoch,
+            model,
+            upscale_factor,
+            prefix=pruner.__class__.__name__,
+            sparsity=sparsity,
+        )
         scheduler.step()
 
         if logging:
@@ -850,6 +894,7 @@ def benchmark(upscale_factor, model_path):
             torch.cuda.synchronize()
 
             inference_times.append(start.elapsed_time(end) / 1000)
+        inference_times = np.array(inference_times[5:])
         print(
             f"TensorRT Benchmark Video from {low_resolution_y}p to {high_resolution_y}p"
         )
@@ -906,6 +951,7 @@ def benchmark(upscale_factor, model_path):
             torch.cuda.synchronize()
 
             inference_times.append(start.elapsed_time(end) / 1000)
+        inference_times = np.array(inference_times[5:])
         print(f"ORT Benchmark Video from {low_resolution_y}p to {high_resolution_y}p")
         print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
         print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
@@ -930,6 +976,8 @@ def benchmark(upscale_factor, model_path):
             torch.cuda.synchronize()
 
             inference_times.append(start.elapsed_time(end) / 1000)
+
+        inference_times = np.array(inference_times[5:])
         print(f"ORT Benchmark Video from {low_resolution_y}p to {high_resolution_y}p")
         print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
         print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
@@ -1154,13 +1202,13 @@ if __name__ == "__main__":
         convert_to_tensorrt(args.model_path)
     elif args.mode == "tvm":
         convert_to_tvm(args.model_path)
-    elif args.mode == "quant":
-        from onnxmltools.utils.float16_converter import (
-            convert_float_to_float16_model_path,
-        )
-        from onnxmltools.utils import save_model
+    # elif args.mode == "quant":
+    #     from onnxmltools.utils.float16_converter import (
+    #         convert_float_to_float16_model_path,
+    #     )
+    #     from onnxmltools.utils import save_model
 
-        new_onnx_model = convert_float_to_float16_model_path(
-            "onnx_models/SuperResolutionTwitter_9.onnx", keep_io_types=False
-        )
-        save_model(new_onnx_model, "onnx_models/SRTfp16.onnx")
+    #     new_onnx_model = convert_float_to_float16_model_path(
+    #         "onnx_models/SuperResolutionTwitter_9.onnx", keep_io_types=False
+    #     )
+    #     save_model(new_onnx_model, "onnx_models/SRTfp16.onnx")

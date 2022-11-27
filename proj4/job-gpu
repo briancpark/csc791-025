@@ -40,3 +40,15 @@ tvmc run --inputs cifar10.npz --print-time --repeat 100 --output tvm_models/resn
 tvmc run --inputs cifar10.npz --print-time --repeat 100 --output tvm_models/resnet18-kd-predictions.npz tvm_models/resnet18-kd-tvm_autotuned.tar
 tvmc run --inputs cifar10.npz --print-time --repeat 100 --output tvm_models/resnet101-predictions.npz tvm_models/resnet101-tvm.tar
 tvmc run --inputs cifar10.npz --print-time --repeat 100 --output tvm_models/resnet18-kd-predictions.npz tvm_models/resnet18-kd-tvm.tar
+
+
+
+
+tvmc run --inputs cifar10.npz --device cuda --print-time --repeat 100 --output tvm_models/resnet101-predictions.npz tvm_models/resnet101-tvm_autotuned.tar
+tvmc run --inputs cifar10.npz --device cuda --print-time --repeat 100 --output tvm_models/resnet18-kd-predictions.npz tvm_models/resnet18-kd-tvm_autotuned.tar
+
+
+tvmc run --inputs cifar10.npz --device cuda --print-time --repeat 100 --output tvm_models/resnet101-predictions.npz tvm_models/resnet101-tvm.tar
+tvmc run --inputs cifar10.npz --device cuda --print-time --repeat 100 --output tvm_models/resnet18-kd-predictions.npz tvm_models/resnet18-kd-tvm.tar
+
+
