@@ -448,10 +448,6 @@ def inference(model_path, upscale_factor, sparsity, pruner="original"):
                 model.__class__.__name__, pruner, upscale_factor, sparsity
             )
 
-    if sparsity:
-        output_dir = output_dir + "/sparsity_{}".format(sparsity)
-        os.makedirs(output_dir, exist_ok=True)
-
     for img_name in tqdm(os.listdir(test_dir)):
         filename = os.path.join(test_dir, img_name)
         output_filename = os.path.join(output_dir, img_name)
@@ -479,7 +475,8 @@ def inference(model_path, upscale_factor, sparsity, pruner="original"):
             out_img = np.uint8(out_img)
             out_img = Image.fromarray(out_img, mode="RGB")
             out_img.save(output_filename)
-            print("output image saved to", output_filename)
+
+    print("output image saved to", output_dir)
 
 
 def training(
@@ -834,8 +831,8 @@ def benchmark(upscale_factor, model_path):
     inference_times = np.array(inference_times[5:])
 
     print("Benchmark Dataset")
-    print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
-    print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
+    print(f"Average inference time: {np.mean(inference_times)} seconds")
+    print(f"Average FPS: {1 / np.mean(inference_times)}")
 
     # Benchmark Video from 360p to 1440p
     high_resolution_x, high_resolution_y = 2560, 1440
@@ -871,10 +868,10 @@ def benchmark(upscale_factor, model_path):
     inference_times = np.array(inference_times[5:])
 
     print(f"Benchmark Video from {low_resolution_y}p to {high_resolution_y}p")
-    print(f"Average inference time: {np.mean(inference_times):.4f} seconds")
-    print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
+    print(f"Average inference time: {np.mean(inference_times)} seconds")
+    print(f"Average FPS: {1 / np.mean(inference_times)}")
 
-    if True:
+    if False:
         # Run TensorRT benchmark
         import torch_tensorrt
 
@@ -902,7 +899,7 @@ def benchmark(upscale_factor, model_path):
         print(f"Average FPS: {1 / np.mean(inference_times):.4f}")
 
     # Run ONNX Runtime benchmark
-    if True:
+    if False:
         import onnxruntime
 
         providers = [
@@ -999,6 +996,63 @@ def demo(upscale_factor, model_path, frame_path):
         img = read_image(fp).to(device)
         out = super_resolution(model, img, upscale_factor)
         save_image(out, sr_frame_path + "/" + frame)
+
+    # This is for benchmarking the overhead
+    # model = torch.load(model_path, map_location=device)
+
+    # img_path = "data/BSDS300/images/test/3096.jpg"
+
+    # cpu = False
+
+    # begin=time.time()
+    # for x in range(1, 100):
+
+    #     if cpu:
+    #         img = Image.open(img_path).convert('YCbCr')
+    #         y, cb, cr = img.split()
+    #         img_to_tensor = ToTensor()
+    #         input = img_to_tensor(y).view(1, -1, y.size[1], y.size[0]).to(device)
+
+    #         out = model(input)
+    #         out = out.cpu()
+    #         out_img_y = out[0].detach().numpy()
+    #         out_img_y *= 255.0
+    #         out_img_y = out_img_y.clip(0, 255)
+    #         out_img_y = Image.fromarray(np.uint8(out_img_y[0]), mode='L')
+
+    #         out_img_cb = cb.resize(out_img_y.size, Image.BICUBIC)
+    #         out_img_cr = cr.resize(out_img_y.size, Image.BICUBIC)
+    #         out_img = Image.merge('YCbCr', [out_img_y, out_img_cb, out_img_cr]).convert('RGB')
+    #         out_img.save("test.jpg")
+
+    #     else:
+    #         img = read_image(img_path).to(device)
+    #         out = super_resolution(model, img, upscale_factor)
+    #         save_image(out, "test.jpg")
+
+    # torch.cuda.synchronize()
+    # print(time.time()-begin)
+
+
+def demo_slides(upscale_factor, model_path, frame_path):
+    model = torch.load(model_path, map_location=device)
+
+    img_path = "data/BSDS300/images/test/3096.jpg"
+
+    img = read_image(img_path).to(device)
+
+    ycbcr_img = rgb_to_ycbcr(img)
+    null_channel = torch.zeros(1, ycbcr_img.shape[1], ycbcr_img.shape[2]).to(device)
+    r_img = torch.stack([img[0:1] / 255.0, null_channel, null_channel], dim=1)
+    b_img = torch.stack([null_channel, img[1:2] / 255.0, null_channel], dim=1)
+    g_img = torch.stack([null_channel, null_channel, img[2:3] / 255.0], dim=1)
+
+    save_image(ycbcr_img[0:1], "y_img.png")
+    save_image(ycbcr_img[1:2], "cb_img.png")
+    save_image(ycbcr_img[2:3], "cr_img.png")
+    save_image(r_img, "r_img.png")
+    save_image(g_img, "g_img.png")
+    save_image(b_img, "b_img.png")
 
 
 def convert_to_onnx(model_path):
@@ -1127,7 +1181,7 @@ if __name__ == "__main__":
         "--model_path", type=str, default="models/original/model_epoch_99.pth"
     )
     parser.add_argument("--upscale_factor", type=int, default=4)
-    parser.add_argument("--sparsity", type=float, default=0.9)
+    parser.add_argument("--sparsity", type=float, default=1.0)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--test_batch_size", type=int, default=100)
     parser.add_argument("--trials", type=int, default=100)
@@ -1144,7 +1198,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--frame_path",
         type=str,
-        default="/ocean/projects/cis220070p/bpark1/demo/frames/macross",
+        default="/ocean/projects/cis220070p/bpark1/demo/frames/topgun",
     )
 
     args = parser.parse_args()
