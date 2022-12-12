@@ -12,12 +12,13 @@ from os.path import exists, basename
 from os.path import join
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data as data
 import matplotlib.pyplot as plt
-from torchvision.io import read_image
+from torchvision.io import read_image, ImageReadMode
 from torchvision.utils import save_image
 from torchvision.transforms.functional import InterpolationMode
 from PIL import Image
@@ -138,9 +139,14 @@ def is_image_file(filename):
 
 def load_img(filepath, ycbcr=True):
     if ycbcr:
-        img = read_image(filepath)
-        y = rgb_to_ycbcr(img)[0:1]
+        img = Image.open(filepath).convert("YCbCr")
+        y, _, _ = img.split()
         return y
+
+        # TODO: (bcp) Reading images directly from disk to GPU blurs the quality.
+        # img = read_image(filepath, mode=ImageReadMode.RGB)
+        # y = rgb_to_ycbcr(img)[0:1]
+        # return y
     else:
         # TODO: convert to PyTorch
         img = Image.open(filepath).convert("RGB")
@@ -163,8 +169,8 @@ class DatasetFromFolder(data.Dataset):
     def __getitem__(self, index):
         input = load_img(self.image_filenames[index], ycbcr=self.ycbcr)
 
-        # target = input.copy()
-        target = input.clone()
+        target = input.copy()  # This is for PIL
+        # target = input.clone() # This is for torchvision
 
         if self.input_transform:
             input = self.input_transform(input)
@@ -210,6 +216,7 @@ def input_transform(crop_size, upscale_factor):
         [
             CenterCrop(crop_size),
             Resize(crop_size // upscale_factor),
+            ToTensor(),
         ]
     )
 
@@ -218,6 +225,7 @@ def target_transform(crop_size):
     return Compose(
         [
             CenterCrop(crop_size),
+            ToTensor(),
         ]
     )
 
@@ -346,7 +354,7 @@ def checkpoint(epoch, model, upscale_factor, prefix="original", sparsity=0):
 def super_resolution(model, img, upscale_factor):
     ycbcr = model_config[model.__class__.__name__]
 
-    if ycbcr:
+    if not ycbcr:
         ycbcr_img = rgb_to_ycbcr(img)
 
         # Deconstruct ycbcr_img
@@ -452,13 +460,36 @@ def inference(model_path, upscale_factor, sparsity, pruner="original"):
         filename = os.path.join(test_dir, img_name)
         output_filename = os.path.join(output_dir, img_name)
 
-        if ycbcr:
+        if not ycbcr:
             img = read_image(filename).to(device)
             out = super_resolution(model, img, upscale_factor)
             save_image(out, output_filename)
+        elif ycbcr:
+            ### TODO: Bluriness is not the issue here, must be training
+            img = Image.open(filename).convert("YCbCr")
+            y, cb, cr = img.split()
+            img_to_tensor = ToTensor()
+            input = img_to_tensor(y).view(1, -1, y.size[1], y.size[0]).to(device)
+
+            out = model(input)
+            out = out.cpu()
+            out_img_y = out[0].detach().numpy()
+            out_img_y *= 255.0
+            out_img_y = out_img_y.clip(0, 255)
+            out_img_y = Image.fromarray(np.uint8(out_img_y[0]), mode="L")
+
+            out_img_cb = cb.resize(out_img_y.size, Image.BICUBIC)
+            out_img_cr = cr.resize(out_img_y.size, Image.BICUBIC)
+            out_img = Image.merge("YCbCr", [out_img_y, out_img_cb, out_img_cr]).convert(
+                "RGB"
+            )
+
+            out_img.save(output_filename)
+
         else:
+            # This is for 3 channels, implement and clean up later
             # TODO: clean up this mass
-            img = Image.open(input_image)
+            img = Image.open(filename)
             img_to_tensor = ToTensor()
             input = img_to_tensor(img).view(1, -1, img.size[1], img.size[0])
 
@@ -835,7 +866,7 @@ def benchmark(upscale_factor, model_path):
     print(f"Average FPS: {1 / np.mean(inference_times)}")
 
     # Benchmark Video from 360p to 1440p
-    high_resolution_x, high_resolution_y = 2560, 1440
+    high_resolution_x, high_resolution_y = 1920, 1080
     low_resolution_x, low_resolution_y = (
         high_resolution_x // upscale_factor,
         high_resolution_y // upscale_factor,
@@ -993,8 +1024,28 @@ def demo(upscale_factor, model_path, frame_path):
 
     for frame in tqdm(os.listdir(frame_path)):
         fp = os.path.join(frame_path, frame)
-        img = read_image(fp).to(device)
-        out = super_resolution(model, img, upscale_factor)
+        # img = read_image(fp).to(device)
+        # out = super_resolution(model, img, upscale_factor)
+
+        img = Image.open(fp).convert("YCbCr")
+        y, cb, cr = img.split()
+        img_to_tensor = ToTensor()
+        input = img_to_tensor(y).view(1, -1, y.size[1], y.size[0]).to(device)
+
+        out = model(input)
+        out = out.cpu()
+        out_img_y = out[0].detach().numpy()
+        out_img_y *= 255.0
+        out_img_y = out_img_y.clip(0, 255)
+        out_img_y = Image.fromarray(np.uint8(out_img_y[0]), mode="L")
+
+        out_img_cb = cb.resize(out_img_y.size, Image.BICUBIC)
+        out_img_cr = cr.resize(out_img_y.size, Image.BICUBIC)
+        out_img = Image.merge("YCbCr", [out_img_y, out_img_cb, out_img_cr]).convert(
+            "RGB"
+        )
+        out = img_to_tensor(out_img)
+
         save_image(out, sr_frame_path + "/" + frame)
 
     # This is for benchmarking the overhead
@@ -1067,7 +1118,7 @@ def convert_to_onnx(model_path):
     ycbcr = model_config[model.__class__.__name__]
     channels = 1 if ycbcr else 3
 
-    input = torch.randn(1, channels, 640, 360)
+    input = torch.randn(1, channels, 270, 480)
 
     torch.onnx.export(
         model,
@@ -1096,7 +1147,7 @@ def convert_to_coreml(model_path):
     channels = 1 if ycbcr else 3
 
     # Trace the model with random data.
-    input = torch.rand(1, channels, 640, 360)
+    input = torch.rand(1, channels, 270, 480)
     traced_model = torch.jit.trace(torch_model, input)
     out = traced_model(input)
 
@@ -1109,7 +1160,7 @@ def convert_to_coreml(model_path):
     )
 
     # Save the converted model.
-    model.save(f"coreml_models/{model.__class__.__name__}.mlpackage")
+    model.save(f"coreml_models/{torch_model.__class__.__name__}.mlpackage")
 
 
 def convert_to_tensorrt(model_path):
@@ -1127,9 +1178,9 @@ def convert_to_tensorrt(model_path):
 
     inputs = [
         torch_tensorrt.Input(
-            min_shape=[1, channels, 640, 360],
-            opt_shape=[1, channels, 640, 360],
-            max_shape=[1, channels, 640, 360],
+            min_shape=[1, channels, 270, 480],
+            opt_shape=[1, channels, 270, 480],
+            max_shape=[1, channels, 270, 480],
             dtype=torch.float,  # torch.half
         )
     ]
@@ -1139,7 +1190,7 @@ def convert_to_tensorrt(model_path):
         model, inputs=inputs, enabled_precisions=enabled_precisions
     )
 
-    input = torch.randn(1, channels, 640, 360).to(device)
+    input = torch.randn(1, channels, 270, 480).to(device)
     result = trt_ts_module(input)
     torch.jit.save(trt_ts_module, f"tensorrt_models/{model.__class__.__name__}.ts")
 
@@ -1174,6 +1225,126 @@ def convert_to_tvm(model_path):
     result = tvmc.run(package, device="cuda")  # Step 3: Run
 
 
+def profile(upscale_factor):
+    from deepspeed.profiling.flops_profiler import get_model_profile
+
+    sr_models = [
+        RFDN(upscale_factor=upscale_factor).to(device),
+        IMDN(upscale_factor=upscale_factor).to(device),
+        RDN(upscale_factor=upscale_factor).to(device),
+        SuperResolutionByteDance(upscale_factor=upscale_factor).to(device),
+        SuperResolutionTwitter(upscale_factor=upscale_factor).to(device),
+        WDSR(upscale_factor=upscale_factor).to(device),
+    ]
+    for model in sr_models:
+        flops, macs, params = get_model_profile(
+            model=model,  # model
+            input_shape=(
+                1,
+                1,
+                270,
+                480,
+            ),  # input shape to the model. If specified, the model takes a tensor with this shape as the only positional argument.
+            args=None,  # list of positional arguments to the model.
+            kwargs=None,  # dictionary of keyword arguments to the model.
+            print_profile=False,  # prints the model graph with the measured profile attached to each module
+            detailed=True,  # print the detailed profile
+            module_depth=-1,  # depth into the nested modules, with -1 being the inner most modules
+            top_modules=1,  # the number of top modules to print aggregated profile
+            warm_up=10,  # the number of warm-ups before measuring the time of each module
+            as_string=True,  # print raw numbers (e.g. 1000) or as human-readable strings (e.g. 1k)
+            output_file=None,  # path to the output file. If None, the profiler prints to stdout.
+            ignore_modules=None,
+        )  # the list of modules to ignore in the profiling
+        print(f"model: {model.__class__.__name__}")
+        print(f"FLOPs: {flops}")
+        print(f"MACs: {macs}")
+        print(f"Params: {params}")
+
+
+def plot():
+    # Plot PSNR of Original
+    SuperResolutionTwitter_df = pd.read_csv(
+        "logs/original_4_SuperResolutionTwitter.csv"
+    )
+    plt.figure(figsize=(10, 5))
+    plt.plot(
+        SuperResolutionTwitter_df["epoch"],
+        SuperResolutionTwitter_df["train_psnr"],
+        label="Train PSNR",
+    )
+    plt.plot(
+        SuperResolutionTwitter_df["epoch"],
+        SuperResolutionTwitter_df["test_psnr"],
+        label="Test PSNR",
+    )
+    plt.legend()
+    plt.xlabel("Epoch")
+    plt.ylabel("PSNR")
+    plt.title("ESPCN PSNR")
+    plt.savefig("figures/SuperResolutionTwitter_PSNR.png", dpi=400)
+    plt.clf()
+
+    # Plot PSNR of Pruned (LevelPruner 60%)
+    SuperResolutionTwitter_df_pruned = pd.read_csv(
+        "logs/LevelPruner_4_SuperResolutionTwitter.csv"
+    )
+    plt.figure(figsize=(10, 5))
+    plt.plot(
+        SuperResolutionTwitter_df_pruned["epoch"],
+        SuperResolutionTwitter_df_pruned["train_psnr"],
+        label="Train PSNR",
+    )
+    plt.plot(
+        SuperResolutionTwitter_df_pruned["epoch"],
+        SuperResolutionTwitter_df_pruned["test_psnr"],
+        label="Test PSNR",
+    )
+    plt.legend()
+    plt.xlabel("Epoch")
+    plt.ylabel("PSNR")
+    plt.title("ESPCN PSNR Finetuned after LevelPruner 60%")
+    plt.savefig("figures/SuperResolutionTwitter_PSNR_pruned.png", dpi=400)
+    plt.clf()
+
+    # Plot the inference times on different hardware targets
+    inference_times = [1.535, 1.559, 71.76, 130.70, 39.995, 71.774, 3.00, 3.17]
+    names = [
+        "ESPCN (V100)",
+        "ESPCN Pruned (V100)",
+        "ESPCN (S10e GPU)",
+        "ESPCN (S10e CPU)",
+        "ESPCN Pruned (S10e GPU)",
+        "ESPCN Pruned (S10e CPU)",
+        "ESPCN (iPhone)",
+        "ESPCN Prune (iPhone)",
+    ]
+
+    x_pos = np.arange(len(names))
+
+    fig, ax = plt.subplots(figsize=(20, 10))
+    bars = ax.bar(
+        x_pos,
+        inference_times,
+        align="center",
+        alpha=0.5,
+        capsize=10,
+    )
+    plt.axhline(y=41.67, color="r", linestyle="-", label="24 FPS")
+    plt.axhline(y=33.33, color="r", linestyle="--", label="30 FPS")
+    plt.axhline(y=16.67, color="r", linestyle="-.", label="60 FPS")
+    plt.axhline(y=8.33, color="r", linestyle=":", label="120 FPS")
+    ax.bar_label(bars)
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(names)
+    plt.legend()
+    ax.set_ylabel("Inference Time (ms)")
+    ax.set_title("Inference Time of ESPCN on Different Hardware Targets")
+    ax.set_xlabel("Hardware Target")
+    plt.savefig("figures/inference_times.png", dpi=400)
+    plt.clf()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", type=str, default="all")
@@ -1182,11 +1353,11 @@ if __name__ == "__main__":
     )
     parser.add_argument("--upscale_factor", type=int, default=4)
     parser.add_argument("--sparsity", type=float, default=1.0)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--test_batch_size", type=int, default=100)
     parser.add_argument("--trials", type=int, default=100)
-    parser.add_argument("--epochs", type=int, default=1000)
-    parser.add_argument("--finetune_epochs", type=int, default=200)
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--finetune_epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--step_size", type=int, default=30)
     parser.add_argument("--momentum", type=float, default=0.5)
@@ -1198,7 +1369,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--frame_path",
         type=str,
-        default="/ocean/projects/cis220070p/bpark1/demo/frames/topgun",
+        default="/ocean/projects/cis220070p/bpark1/demo/frames/queen",
     )
 
     args = parser.parse_args()
@@ -1256,6 +1427,10 @@ if __name__ == "__main__":
         convert_to_tensorrt(args.model_path)
     elif args.mode == "tvm":
         convert_to_tvm(args.model_path)
+    elif args.mode == "profile":
+        profile(args.upscale_factor)
+    elif args.mode == "plot":
+        plot()
     # elif args.mode == "quant":
     #     from onnxmltools.utils.float16_converter import (
     #         convert_float_to_float16_model_path,
