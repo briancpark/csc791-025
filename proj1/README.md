@@ -3,11 +3,13 @@
 ## Installation and Setup
 
 For ARC or local Linux/UNIX system, installation should be easy. We highly recommend using a Conda environment if possible
+
 ```sh
 pip3 install -r requirements.txt
 ```
 
-Sometimes, the CUDA won't be linked properly upon the first installation. For a lot of the nodes on ARC, they have CUDA 11.7. If that's the case please install nightly builds of PyTorch: 
+Sometimes, the CUDA won't be linked properly upon the first installation. For a lot of the nodes on ARC, they have CUDA 11.7. If that's the case please install nightly builds of PyTorch:
+
 ```sh
 conda install pytorch torchvision pytorch-cuda=11.7 -c pytorch-nightly -c nvidia
 pip3 install --pre torch torchvision --extra-index-url https://download.pytorch.org/whl/nightly/cu117
@@ -16,6 +18,7 @@ pip3 install --pre torch torchvision --extra-index-url https://download.pytorch.
 For M1 Mac, installation needs to be specialized.
 
 For example, NNI needs to be built from [source](https://nni.readthedocs.io/en/stable/notes/build_from_source.html) as Microsoft does not release the wheels for ARM architecture yet:
+
 ```sh
 git clone https://github.com/microsoft/nni.git
 cd nni
@@ -32,12 +35,14 @@ device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if 
 ```
 
 To run jupyter notebook on ARC cluster with VSCode extension make sure to run these commands:
+
 ```sh
 jupyter-notebook --ip=cXX *.ipynb
 module load cuda
 ```
 
 Or run the script we created:
+
 ```sh
 ./run.sh
 ```
@@ -45,20 +50,16 @@ Or run the script we created:
 ## Running the Project
 
 To simply run everything, just run this command:
+
 ```sh
 python3 proj1.py
 ```
 
 You can also run parts of the project individually. For example, training will take a very long time:
+
 ```sh
 python3 proj1.py train     # train DNNs
 python3 proj1.py prune     # prune DNNs
 python3 proj1.py figures   # plot figures for report
 python3 proj1.py benchmark # benchmark normal vs. pruned DNNs
 ```
-
-### **IMPORTANT**
-If you want to skip training, since it'll take really long, please download the model weights from Google Drive into `/models` directory for  
-[`mnist_cnn.pt`](https://drive.google.com/file/d/177gkGVjz-cOYTy-Z3cqHvA4NFqt69u6i/view?usp=sharing) and
-[`cifar10_resnet101.pt`](https://drive.google.com/file/d/16xlIGMnmTaITuP8AVYB-NtN8JT7w9f8F/view?usp=sharing)
-
