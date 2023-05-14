@@ -64,6 +64,7 @@ test_loader = torch.utils.data.DataLoader(
     shuffle=True,
 )
 
+
 # define the trainer and evaluator
 def trainer(model, optimizer, criterion):
     # training the model
