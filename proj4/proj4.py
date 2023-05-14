@@ -259,7 +259,6 @@ def convert_torch_to_onnx():
 
 
 def preprocess():
-
     img_url = "https://s3.amazonaws.com/model-server/inputs/kitten.jpg"
     img_path = download_testdata(img_url, "imagenet_cat.png", module="data")
 

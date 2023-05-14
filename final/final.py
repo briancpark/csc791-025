@@ -880,7 +880,6 @@ def benchmark(upscale_factor, model_path):
         end = torch.cuda.Event(enable_timing=True)
 
         for _ in range(1000):
-
             start.record()
             _ = model(input)
             end.record()
@@ -890,7 +889,6 @@ def benchmark(upscale_factor, model_path):
             inference_times.append(start.elapsed_time(end) / 1000)
     else:
         for _ in range(1000):
-
             tik = time.perf_counter()
             _ = model(input)
             tok = time.perf_counter()
@@ -914,7 +912,6 @@ def benchmark(upscale_factor, model_path):
         end = torch.cuda.Event(enable_timing=True)
 
         for _ in range(1000):
-
             start.record()
             result = trt_ts_module(input_)
             end.record()
@@ -971,7 +968,6 @@ def benchmark(upscale_factor, model_path):
         end = torch.cuda.Event(enable_timing=True)
 
         for _ in range(1000):
-
             start.record()
             ort_outs = ort_session.run(None, ort_inputs)
             end.record()
