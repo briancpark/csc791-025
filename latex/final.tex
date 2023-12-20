@@ -174,9 +174,9 @@ How we exactly convert it is using elementwise tensor operations and slicing. Th
 
 \begin{equation}
 	\begin{split}
-		Y  &= R *  0.29900 + G *  0.58700 + B *  0.11400 \\
-		Cb &= R * -0.16874 + G * -0.33126 + B *  0.50000 + 128 \\
-		Cr &= R *  0.50000 + G * -0.41869 + B * -0.08131 + 128 \\
+		Y  & = R *  0.29900 + G *  0.58700 + B *  0.11400       \\
+		Cb & = R * -0.16874 + G * -0.33126 + B *  0.50000 + 128 \\
+		Cr & = R *  0.50000 + G * -0.41869 + B * -0.08131 + 128 \\
 		\label{eq:1}
 	\end{split}
 \end{equation}
@@ -184,9 +184,9 @@ How we exactly convert it is using elementwise tensor operations and slicing. Th
 
 \begin{equation}
 	\begin{split}
-		R  &= Y +   (Cr - 128) *  1.40200 \\
-		G  &= Y + (Cb - 128) * -0.34414 + (Cr - 128) * -0.71414 \\
-		B  &= Y + (Cb - 128) *  1.77200
+		R & = Y +   (Cr - 128) *  1.40200                       \\
+		G & = Y + (Cb - 128) * -0.34414 + (Cr - 128) * -0.71414 \\
+		B & = Y + (Cb - 128) *  1.77200
 		\label{eq:2}
 	\end{split}
 \end{equation}
@@ -244,16 +244,16 @@ For XGen, we were able to get one model running with out optimizaitons. One core
 We use the Peak Signal-to-Noise Ratio (PSNR) to evaluate our model quality. PSNR is defined as:
 \begin{equation}
 	\begin{split}
-		MSE &= \frac{1}{m n} \sum_{i=0}^{m-1} \sum_{j=0}^{n-1}[I(i, j)-K(i, j)]^2 \\
+		MSE & = \frac{1}{m n} \sum_{i=0}^{m-1} \sum_{j=0}^{n-1}[I(i, j)-K(i, j)]^2 \\
 	\end{split}
 \end{equation}
 
 
 \begin{equation}
 	\begin{split}
-		PSNR &=10 \cdot \log _{10}\left(\frac{M A X_I^2}{M S E}\right) \\
-		&=20 \cdot \log _{10}\left(\frac{M A X_I}{\sqrt{M S E}}\right) \\
-		&=20 \cdot \log _{10}\left(M A X_I\right)-10 \cdot \log _{10}(M S E)
+		PSNR & =10 \cdot \log _{10}\left(\frac{M A X_I^2}{M S E}\right)            \\
+		     & =20 \cdot \log _{10}\left(\frac{M A X_I}{\sqrt{M S E}}\right)       \\
+		     & =20 \cdot \log _{10}\left(M A X_I\right)-10 \cdot \log _{10}(M S E)
 	\end{split}
 \end{equation}
 
