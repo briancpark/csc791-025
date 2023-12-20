@@ -1,0 +1,54 @@
+name: LaTeX Build and Lint
+
+on:
+    push:
+      branches: [ main ]
+    pull_request:
+      branches: [ main ]
+    schedule:
+      # Schedule to run at 00:00 UTC on the 1st of every month
+      - cron: '0 0 1 * *'
+jobs:
+  build-and-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Set up Git repository
+      uses: actions/checkout@v3
+
+    - name: Install LaTeX
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y texlive-latex-base texlive-fonts-recommended texlive-latex-extra texlive-fonts-extra texlive-latex-recommended texlive-science
+
+    - name: Install cpanminus and Perl dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cpanminus
+        sudo cpanm Log::Log4perl Log::Dispatch::File YAML::Tiny File::HomeDir Unicode::GCString
+
+    - name: Install latexindent
+      run: |
+        curl -L https://github.com/cmhughes/latexindent.pl/archive/master.zip -o latexindent.zip
+        unzip latexindent.zip -d latexindent
+        sudo cp -r latexindent/latexindent.pl-main/* /usr/local/bin/
+        sudo chmod +x /usr/local/bin/latexindent.pl
+        sudo mv /usr/local/bin/latexindent.pl /usr/local/bin/latexindent
+
+    - name: Verify latexindent installation
+      run: |
+        latexindent --version
+
+    - name: Check LaTeX formatting
+      working-directory: latex
+      run: make check
+
+    - name: Compile LaTeX documents
+      working-directory: latex
+      run: make all
+
+    - name: Upload PDFs
+      uses: actions/upload-artifact@v3
+      with:
+        name: Compiled-PDFs
+        path: latex/*.pdf

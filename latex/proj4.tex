@@ -38,9 +38,9 @@ For the first part of the project, we applied knowledge distillation on a DNN mo
 We also tried additional techniques to speed up training and distillation, such as using mutliple GPUs. Fortunately, bridges-2 nodes have DGX-1 system on \verb|GPU-shared| allocations. An allocation up to 4 V100 GPUs connected via NVLink can be used for data parallel training \cite{v100}. PyTorch natively supports data parallel training on multi GPUs in an intra-node setting via \verb|torch.nn.DataParallel| and \verb|torch.nn.DistributedDataParallel| \cite{pytorch}. We were inspired to use such tasks to fully utilize the supercomputer hardware from related works \cite{imagenet-quick}. Although we successfully trained in a \verb|DataParallel| and \verb|DistributedDataParallel| setting, we realized this process is impossible to apply at the distillation stage. First, NNI creates wrappers around PyTorch modules, making some of the API incompatible with each other. Once a PyTorch model is converted to a distributed setting, it's hard to convert it back to single GPU setting. Plus, we noticed that there is not much work related to distributed distillation on large models to small models, so we moved on to a simpler setup.
 
 \begin{figure}
-    \centerline{\includegraphics[width=7in]{../proj4/figures/distill.png}}
-    \caption{Knowledge Distillation Pipeline \cite{nni}}
-    \label{fig:kd-pipe}
+	\centerline{\includegraphics[width=7in]{../proj4/figures/distill.png}}
+	\caption{Knowledge Distillation Pipeline \cite{nni}}
+	\label{fig:kd-pipe}
 \end{figure}
 
 After leveraging NNI and PyTorch to do knowledge distillation to a smaller model, we then used TVM to do end-to-end compiler optimizations to the model \cite{tvm}.
@@ -50,17 +50,17 @@ We were able to convert PyTorch to a ONNX file using PyTorch's API. Then we conv
 % The original DNN model, and its forms after (ii), (iii), and (v). 
 For this project, we chose ResNet-101 that we previously trained from a previous project on the CIFAR-10 dataset \cite{resnet, cifar10}. Given the time constraint, we didn't want to train a large model from scratch. We actually tried to use DenseNet initially, but ran into issues related to OOM and training speed since we have to load both the teacher and the student model \cite{densenet}. We also tried to skip training from scratch by using the ImageNet dataset, since Torchvision provides pretrained models for it \cite{imagenet, torchvision}. But turns out ImageNet is a very large dataset and it would take days or weeks even on state of the art hardware. We tried some other techniques to utilize the powerful resource of bridges-2 supercomputer, but later realized that NNI and PyTorch makes this process incompatible \cite{bridges-2}.
 
-We chose to distill ResNet-101 model to ResNet-18 model that is also pruned via NNI. We did not apply quantization since NNI doesn't support it properly as we have observed from a previous project. 
+We chose to distill ResNet-101 model to ResNet-18 model that is also pruned via NNI. We did not apply quantization since NNI doesn't support it properly as we have observed from a previous project.
 
 The ResNet-18 model is structured pruned via NNI with L1NormPruner with a sparsity of $10\%$ on only \verb|Conv2D| layers \cite{l1prune}. We could not apply pruning on \verb|Linear| layers as the distillation process becomes broken due to incompatible tensor sizes.
 
 \begin{figure}
-    \centerline{\includegraphics[width=7in]{../proj4/figures/kd_training.png}}
-    \caption{Knowledge Distillation Training Accuracy over Epochs}
-    \label{fig:kd-training}
+	\centerline{\includegraphics[width=7in]{../proj4/figures/kd_training.png}}
+	\caption{Knowledge Distillation Training Accuracy over Epochs}
+	\label{fig:kd-training}
 \end{figure}
 
-Since there is extra hyperparameter of temperature in knowledge distillation, so we tried temperatures of $T = 1, 5, 10, 15, 20$, just like how Hinton experimented between values of $T$ from 1 to 20 \cite{distillation}. We train and finetune the weights for 20 more epochs. 
+Since there is extra hyperparameter of temperature in knowledge distillation, so we tried temperatures of $T = 1, 5, 10, 15, 20$, just like how Hinton experimented between values of $T$ from 1 to 20 \cite{distillation}. We train and finetune the weights for 20 more epochs.
 
 After distilling in PyTorch, we converted it to ONNX model files and then to TVM compiled executables. Unfortunately, we couldn't get TVM to compile to a GPU target due to an unknown issue with CUDA libraries not being able to be found and linked properly. Instead, we compiled to LLVM target and benchmarked on the CPU for a fair comparison across optimizations.
 
@@ -70,12 +70,12 @@ For TVM, we also applied tuning that uses XGBoost to automatically tune the perf
 % The accuracy and speed of the original model, and its variants after (ii), (iii), and (v). Explain the reasons for the differences.  
 The original ResNet-101 model, or teacher model has a training accuracy of 84.822\% and a validation accuracy of 79.27\%. When applying distillation, we got a training accuracy of 84.6\& on the ResNet-18 distilled model. In the end, we chose the distilled model with a temperature of 1 since it had marginally best training accuracy. Figure \ref{fig:kd-training} shows the training accuracy over epochs. It makes sense that the distilled model should not outperform the teacher model. Unfortunately, changing the temperature doesn't vary a lot, and it's also suspicious why the training accuracy starts off already high. Compared to related works where Stanton experiments and questions the knowledge distillation works, it seems that we may have a flaw in our experimental methodology \cite{distillation-works}.
 
-Figure \ref{fig:tvm-benchmarks} shows the benchmarks of each framework on the CPU of bridges-2, which has a Intel(R) Xeon(R) Gold 6248 CPU. We took one sample image from CIFAR-10. From PyTorch to TVM tuned model, we decreased inference time from 12.97 ms to 8.90 ms for ResNet-101 alone. For ResNet-18 with knowledge distillation the inference time decreased from 5.35 to 2.64. We see that 2-3 ms is saved from just TVM. 
+Figure \ref{fig:tvm-benchmarks} shows the benchmarks of each framework on the CPU of bridges-2, which has a Intel(R) Xeon(R) Gold 6248 CPU. We took one sample image from CIFAR-10. From PyTorch to TVM tuned model, we decreased inference time from 12.97 ms to 8.90 ms for ResNet-101 alone. For ResNet-18 with knowledge distillation the inference time decreased from 5.35 to 2.64. We see that 2-3 ms is saved from just TVM.
 
 \begin{figure}
-    \centerline{\includegraphics[width=7in]{../proj4/figures/tvm_benchmarks.png}}
-    \caption{PyTorch vs TVM Benchmarks}
-    \label{fig:tvm-benchmarks}
+	\centerline{\includegraphics[width=7in]{../proj4/figures/tvm_benchmarks.png}}
+	\caption{PyTorch vs TVM Benchmarks}
+	\label{fig:tvm-benchmarks}
 \end{figure}
 
 The model size doesn't change at all between compilation phases, since we aren't modifying the weights in the compile phase. But interestingly, we see that for ResNet-101 the model size is 170 MB, while the distilled smaller model is 41 MB. At least with knowledge distillation, we're able to retain accuracy within a percent, as well as gain $4.14\times$ size reduction and $4.95\times$ speedup on inference time with compilation optimizations. If this was video processing application where images are streamed, we'd increase processing performance from 77 FPS to 379 FPS.
