@@ -34,19 +34,6 @@ To make code hardware agnostic and conveniently switch backends between differen
 device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
 ```
 
-To run jupyter notebook on ARC cluster with VSCode extension make sure to run these commands:
-
-```sh
-jupyter-notebook --ip=cXX *.ipynb
-module load cuda
-```
-
-Or run the script we created:
-
-```sh
-./run.sh
-```
-
 ## Running the Project
 
 To simply run everything, just run this command:
