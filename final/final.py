@@ -46,7 +46,7 @@ from tqdm import tqdm
 
 # pylint: disable=redefined-outer-name,invalid-name,import-outside-toplevel,too-many-lines
 # pylint: disable=too-many-arguments,too-many-locals,not-callable,too-many-branches
-# pylint: disable=too-many-statements,pointless-exception-statement,protected-access
+# pylint: disable=too-many-statements,pointless-exception-statement,protected-access,fixme
 
 from model import (
     FMEN,
@@ -800,7 +800,8 @@ def prune(
 
         if logging:
             with open(
-                f"logs/{pruner.__class__.__name__}_{upscale_factor}_{model.__class__.__name__ }.csv",
+                f"logs/{pruner.__class__.__name__}_{upscale_factor}\
+                    _{model.__class__.__name__ }.csv",
                 "a",
                 encoding="utf-8",
             ) as fh:

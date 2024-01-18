@@ -74,7 +74,7 @@ if torch.cuda.is_available():
     # defaults to True.
     torch.backends.cudnn.allow_tf32 = True
 
-    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
+    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
 
 class Net(nn.Module):
@@ -199,7 +199,7 @@ def load_data(train_kwargs, test_kwargs, mnist=True):
 
 
 def train_models(resnet=False, retrain=False):
-    """ "Train the models"""
+    """Train the models"""
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
@@ -606,6 +606,7 @@ if __name__ == "__main__":
 
     if args.train:
         train_models(resnet=True, retrain=False)
+        train_models(resnet=False, retrain=False)
 
     elif args.prune:
         if device.type == "mps":

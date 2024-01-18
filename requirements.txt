@@ -7,6 +7,7 @@ nvidia-tensorrt
 tensorboard<=2.80
 torchviz>=0.0.2
 black
+pylint
 numpy
 pandas
 matplotlib

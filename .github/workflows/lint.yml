@@ -10,6 +10,26 @@ on:
       - cron: '0 0 1 * *'
 
 jobs:
+  pylint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: 3.10
+      - name: Install CSC 791
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install -r requirements.txt
+      - name: Run pylint
+        run: |
+          pylint proj1/proj1.py
+          pylint proj2/proj2.py
+          pylint proj3/proj3.py
+          pylint proj3/model.py
+          pylint proj4/proj4.py
+          # pylint final/final.py
   lint:
     runs-on: ubuntu-latest
     steps:
