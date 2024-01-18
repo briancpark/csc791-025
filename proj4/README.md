@@ -1,4 +1,4 @@
-# Project 4 (Optional): Distillation and Compilation
+# Project 4: Distillation and Compilation
 
 ## PSC Installation and Setup
 
@@ -29,3 +29,12 @@ conda install pytorch torchvision pytorch-cuda=11.7 -c pytorch-nightly -c nvidia
 ```
 
 ### Running Project
+
+
+```sh
+python3 proj4.py --prune
+python3 proj4.py --distillation
+python3 proj4.py --convert
+python3 proj4.py --preprocess
+python3 proj4.py --figures
+```

@@ -45,8 +45,8 @@ python3 proj1.py
 You can also run parts of the project individually. For example, training will take a very long time:
 
 ```sh
-python3 proj1.py train     # train DNNs
-python3 proj1.py prune     # prune DNNs
-python3 proj1.py figures   # plot figures for report
-python3 proj1.py benchmark # benchmark normal vs. pruned DNNs
+python3 proj1.py --train     # train DNNs
+python3 proj1.py --prune     # prune DNNs
+python3 proj1.py --figures   # plot figures for report
+python3 proj1.py --benchmark # benchmark normal vs. pruned DNNs
 ```

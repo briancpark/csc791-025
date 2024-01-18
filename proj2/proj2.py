@@ -1,22 +1,25 @@
-import torch
-import sys
+"""DNN Quantization via NNI"""
+
 import os
 import csv
 import time
+import argparse
+from pathlib import Path
 
-import torch.nn as nn
+import torch
 import torch.nn.functional as F
-import torch.optim as optim
+from torch import nn
+from torch import optim
 from torch.optim import SGD
-from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
+from torchvision import datasets, transforms
+from torchvision import models
+
 from torchviz import make_dot
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import torchvision.models as models
-from pathlib import Path
 
 from nni.algorithms.compression.pytorch.quantization import (
     NaiveQuantizer,
@@ -25,6 +28,10 @@ from nni.algorithms.compression.pytorch.quantization import (
     BNNQuantizer,
     ObserverQuantizer,
 )
+
+# pylint: disable=redefined-outer-name,invalid-name,import-outside-toplevel
+# pylint: disable=too-many-arguments,too-many-locals,not-callable,too-many-branches
+# pylint: disable=too-many-statements,pointless-exception-statement,protected-access
 
 device = torch.device(
     "mps"
@@ -62,14 +69,18 @@ if torch.cuda.is_available():
     # in PyTorch 1.12 and later.
     torch.backends.cuda.matmul.allow_tf32 = True
 
-    # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
+    # The flag below controls whether to allow TF32 on cuDNN. This flag
+    # defaults to True.
     torch.backends.cudnn.allow_tf32 = True
 
     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
 
 
 class Net(nn.Module):
+    """Very simple CNN for MNIST"""
+
     def __init__(self):
+        """Initialize the model"""
         super().__init__()
         self.conv1 = nn.Conv2d(1, 32, 3, 1)
         self.conv2 = nn.Conv2d(32, 64, 3, 1)
@@ -79,6 +90,7 @@ class Net(nn.Module):
         self.fc2 = nn.Linear(128, 10)
 
     def forward(self, x):
+        """Forward pass"""
         x = self.conv1(x)
         x = F.relu(x)
         x = self.conv2(x)
@@ -94,20 +106,23 @@ class Net(nn.Module):
         return output
 
 
-# For benchmarking purposes, we need to add synchronization primitives
 def touch():
+    """For benchmarking purposes, we need to add synchronization primitives"""
     if device.type == "cuda":
         torch.cuda.synchronize()
+    elif device.type == "mps":
+        torch.mps.synchronize()
 
 
 def train(model, device, train_loader, optimizer, criterion, epoch):
+    """Train the model"""
     model.train()
 
     t_iter = tqdm(
         train_loader, position=1, desc=str(epoch), leave=False, colour="yellow"
     )
 
-    for batch_idx, (data, target) in enumerate(t_iter):
+    for _, (data, target) in enumerate(t_iter):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
@@ -115,10 +130,11 @@ def train(model, device, train_loader, optimizer, criterion, epoch):
         loss.backward()
         optimizer.step()
 
-        t_iter.set_description("Loss: %.4f" % loss.item(), refresh=False)
+        t_iter.set_description(f"Loss: {loss.item():.4f}", refresh=False)
 
 
 def test(model, device, test_loader, criterion):
+    """Test the model"""
     model.eval()
     test_loss = 0
     correct = 0
@@ -139,10 +155,11 @@ def test(model, device, test_loader, criterion):
 
 
 def load_data(train_kwargs, test_kwargs, mnist=True):
+    """Load the data"""
     if arc_env:
-        dir = "/mnt/beegfs/" + os.environ["USER"] + "/data/"
+        data_dir = "/mnt/beegfs/" + os.environ["USER"] + "/data/"
     else:
-        dir = "data"
+        data_dir = "data"
 
     if mnist:
         # The transformations were copied from the PyTorch MNIST example
@@ -150,10 +167,13 @@ def load_data(train_kwargs, test_kwargs, mnist=True):
             [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
         )
 
-        dataset1 = datasets.MNIST(dir, train=True, download=True, transform=transform)
-        dataset2 = datasets.MNIST(dir, train=False, transform=transform)
+        dataset1 = datasets.MNIST(
+            data_dir, train=True, download=True, transform=transform
+        )
+        dataset2 = datasets.MNIST(data_dir, train=False, transform=transform)
     else:
-        # The transformations were copied from https://www.programcreek.com/python/example/105099/torchvision.datasets.CIFAR100
+        # The transformations were copied from
+        # https://www.programcreek.com/python/example/105099/torchvision.datasets.CIFAR100
         transform = transforms.Compose(
             [
                 transforms.RandomHorizontalFlip(),
@@ -166,8 +186,10 @@ def load_data(train_kwargs, test_kwargs, mnist=True):
             ]
         )
 
-        dataset1 = datasets.CIFAR10(dir, train=True, download=True, transform=transform)
-        dataset2 = datasets.CIFAR10(dir, train=False, transform=transform)
+        dataset1 = datasets.CIFAR10(
+            data_dir, train=True, download=True, transform=transform
+        )
+        dataset2 = datasets.CIFAR10(data_dir, train=False, transform=transform)
 
     train_loader = torch.utils.data.DataLoader(dataset1, **train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
@@ -176,10 +198,12 @@ def load_data(train_kwargs, test_kwargs, mnist=True):
 
 
 def train_models(resnet=False, quantizer="", retrain=False):
+    """Train the models"""
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
-    # If we're using NVIDIA, we can apply some more software/hardware optimizations if available
+    # If we're using NVIDIA, we can apply some more software/hardware
+    # optimizations if available
     if device.type == "cuda":
         cuda_kwargs = {"num_workers": num_cpus, "pin_memory": True, "shuffle": True}
         train_kwargs.update(cuda_kwargs)
@@ -210,7 +234,8 @@ def train_models(resnet=False, quantizer="", retrain=False):
 
     if resnet:
         # CIFAR-10 ResNet-101
-        # Reccomended hyperparameters are here: https://discuss.pytorch.org/t/resnet-with-cifar10-only-reaches-86-accuracy-expecting-90/135051
+        # Reccomended hyperparameters are here:
+        # https://discuss.pytorch.org/t/resnet-with-cifar10-only-reaches-86-accuracy-expecting-90/135051
         optimizer = SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4)
         scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[90, 135])
         criterion = nn.CrossEntropyLoss()
@@ -222,7 +247,7 @@ def train_models(resnet=False, quantizer="", retrain=False):
 
     # For logging purposes
     if not os.path.exists(logger_fn):
-        with open(logger_fn, "w", newline="") as fh:
+        with open(logger_fn, "w", newline="", encoding="utf-8") as fh:
             writer = csv.writer(fh)
             writer.writerow(
                 [
@@ -253,7 +278,7 @@ def train_models(resnet=False, quantizer="", retrain=False):
         )
 
         # For logging purposes
-        with open(logger_fn, "a") as fh:
+        with open(logger_fn, "a", newline="", encoding="utf-8") as fh:
             writer = csv.writer(fh)
             writer.writerow(
                 [
@@ -267,10 +292,10 @@ def train_models(resnet=False, quantizer="", retrain=False):
                     test_accuracy,
                 ]
             )
-        tqdm.write("Accuracy: %.4f" % test_accuracy)
+        tqdm.write(f"Accuracy: {test_accuracy:.4f}")
         scheduler.step()
 
-        ### Update the weights and save the model
+        # Update the weights and save the model
         torch.save(model, model_save_path)
         if test_accuracy > 99.0:
             break
@@ -279,17 +304,17 @@ def train_models(resnet=False, quantizer="", retrain=False):
         model, device, test_loader, criterion
     )
     print(
-        "Average test loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)".format(
-            test_loss, correct, test_dataset_length, accuracy
-        )
+        f"Average test loss: {test_loss:.4f}, \
+        Accuracy: {correct}/{test_dataset_length} ({accuracy:.0f}%)"
     )
 
 
 def quantize(device, quantizer, resnet=False):
+    """Quantize the models"""
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
-    train_loader, test_loader = load_data(train_kwargs, test_kwargs, mnist=not resnet)
+    train_loader, _ = load_data(train_kwargs, test_kwargs, mnist=not resnet)
 
     if device.type == "cuda":
         cuda_kwargs = {"num_workers": num_cpus, "pin_memory": True, "shuffle": True}
@@ -414,7 +439,7 @@ def quantize(device, quantizer, resnet=False):
 
 
 def figures(device):
-    # Plot the computational graphs of the models
+    """Plot the computational graphs of the models"""
     if device.type == "mps":
         UserWarning("Cannot generate graphs on MPS mode, fallback to CPU")
         device = torch.device("cpu")
@@ -441,7 +466,7 @@ def figures(device):
 
     for model_fn in model_fns:
         model = torch.load(model_fn, map_location=device)
-        layers = [module for module in model.modules()]
+        layers = model.modules()
 
         ones, neg_ones = 0, 0
         for layer in layers:
@@ -449,7 +474,7 @@ def figures(device):
                 ones += torch.sum(layer.module.weight.data == 1).item()
                 neg_ones += torch.sum(layer.module.weight.data == -1).item()
 
-        print("Number of 1s: {}, Number of -1s: {}".format(ones, neg_ones))
+        print(f"Number of 1s: {ones}, Number of -1s: {neg_ones}")
         # Plot the accuracy and loss graphs
         files = os.listdir("logs")
 
@@ -480,7 +505,7 @@ def figures(device):
         labs = [l.get_label() for l in leg]
         ax1.legend(leg, labs, loc="center right")
 
-        model_type = str(Path(file)).split("_")[0]
+        model_type = str(Path(file)).split("_", maxsplit=1)[0]
         if model_type == "cifar10":
             model_title = "CIFAR-10 ResNet-101"
         else:
@@ -503,16 +528,18 @@ def figures(device):
 
 
 def benchmark(device, resnet=False):
+    """Benchmark the models"""
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
-    # If we're using NVIDIA, we can apply some more software/hardware optimizations if available
+    # If we're using NVIDIA, we can apply some more software/hardware
+    # optimizations if available
     if device.type == "cuda":
         cuda_kwargs = {"num_workers": num_cpus, "pin_memory": True, "shuffle": True}
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
 
-    train_loader, test_loader = load_data(train_kwargs, test_kwargs, mnist=not resnet)
+    _, test_loader = load_data(train_kwargs, test_kwargs, mnist=not resnet)
 
     if resnet:
         model_save_path = "models/cifar10_resnet101.pt"
@@ -521,7 +548,7 @@ def benchmark(device, resnet=False):
 
     model = torch.load(model_save_path, map_location=device)
 
-    ### Warmup, CUDA typically has overhead on the first run
+    # Warmup, CUDA typically has overhead on the first run
     for _ in range(5):
         test(model, device, test_loader, criterion)
 
@@ -538,17 +565,12 @@ def benchmark(device, resnet=False):
         times.append(total_time)
         _, _, _, baseline_train_accuracy = test(model, device, test_loader, criterion)
         print(
-            "Average test loss: {:.4f}, Train Accuracy ({:.0f}%), Val Accuracy: {}/{} ({:.0f}%)".format(
-                test_loss,
-                baseline_train_accuracy,
-                correct,
-                test_dataset_length,
-                accuracy,
-            )
+            f"Average test loss: {test_loss:.4f}, \
+            Train Accuracy ({baseline_train_accuracy:.0f}%), \
+            Val Accuracy: {correct}/{test_dataset_length} ({accuracy:.0f}%)"
         )
 
     baseline_time = sum(times) / len(times)
-    baseline_std_time = np.std(times)
     baseline_accuracy = accuracy
     print("Average time: ", baseline_time)
 
@@ -558,7 +580,8 @@ def benchmark(device, resnet=False):
     accuracies = []
     train_accuracies = []
 
-    # Based on our training session, we pick the ones that actually trained properly
+    # Based on our training session, we pick the ones that actually trained
+    # properly
     if resnet:
         model_names = ["DoReFaQuantizer", "BNNQuantizer", "ObserverQuantizer"]
         model_fns = [
@@ -599,9 +622,9 @@ def benchmark(device, resnet=False):
             times.append(total_time)
             _, _, _, train_accuracy = test(model, device, test_loader, criterion)
             tqdm.write(
-                "Average test loss: {:.4f}, Train Accuracy ({:.0f}%), Val Accuracy: {}/{} ({:.0f}%)".format(
-                    test_loss, train_accuracy, correct, test_dataset_length, accuracy
-                )
+                f"Average test loss: {test_loss:.4f}, \
+                Train Accuracy: {train_accuracy:.0f}%, \
+                Val Accuracy: {correct}/{test_dataset_length} ({accuracy:.0f}%)"
             )
             accuracies_subtrials.append(accuracy)
             training_accuracy_subtrials.append(train_accuracy)
@@ -618,7 +641,7 @@ def benchmark(device, resnet=False):
         accuracies.append(accuracies_avg)
         train_accuracies.append(training_accuracy_avg)
 
-        tqdm.write("Average time: {0}".format(sum(times) / len(times)))
+        tqdm.write(f"Average time: {sum(times) / len(times)}")
 
     model_names.insert(0, "Baseline")
     exec_times.insert(0, baseline_time)
@@ -635,10 +658,10 @@ def benchmark(device, resnet=False):
     barWidth = 0.25
     br1 = np.arange(len(model_names))
     br2 = [x + barWidth for x in br1]
-    p0 = ax1.bar(br1, exec_times, width=barWidth, color="blue", label="Execution Time")
+    ax1.bar(br1, exec_times, width=barWidth, color="blue", label="Execution Time")
     plt.ylabel("Execution Time (s)")
     ax2 = ax1.twinx()
-    p1 = ax2.bar(br2, accuracies, width=barWidth, color="green", label="Accuracy")
+    ax2.bar(br2, accuracies, width=barWidth, color="green", label="Accuracy")
     plt.ylabel("Validation Accuracy (%)")
 
     colors = {"Execution Time": "blue", "Accuracy": "green"}
@@ -658,39 +681,23 @@ def benchmark(device, resnet=False):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1:
+    parser = argparse.ArgumentParser(description="Process some integers.")
+    parser.add_argument("--train", action="store_true", help="Train models")
+    parser.add_argument("--quantize", action="store_true", help="Quantize models")
+    parser.add_argument("--figures", action="store_true", help="Generate figures")
+    parser.add_argument("--benchmark", action="store_true", help="Benchmark models")
+
+    args = parser.parse_args()
+
+    if args.train:
         train_models(resnet=True)
         train_models(resnet=False)
-
-        quantize(device, "NaiveQuantizer", resnet=False)
-        quantize(device, "BNNQuantizer", resnet=False)
-        quantize(device, "QAT_Quantizer", resnet=False)
-        quantize(device, "DoReFaQuantizer", resnet=False)
-        quantize(device, "ObserverQuantizer", resnet=False)
-
-        quantize(device, "NaiveQuantizer", resnet=True)
-        quantize(device, "BNNQuantizer", resnet=True)
-        quantize(device, "QAT_Quantizer", resnet=True)
-        quantize(device, "DoReFaQuantizer", resnet=True)
-        quantize(device, "ObserverQuantizer", resnet=True)
-
         train_models(resnet=True, quantizer="NaiveQuantizer")
         train_models(resnet=False, quantizer="BNNQuantizer")
         train_models(resnet=False, quantizer="QAT_Quantizer")
         train_models(resnet=False, quantizer="DoReFaQuantizer")
 
-        benchmark(device, resnet=False)
-        benchmark(device, resnet=True)
-
-        figures(device)
-
-    elif sys.argv[1] == "train":
-        train_models(resnet=True, quantizer="NaiveQuantizer")
-        train_models(resnet=False, quantizer="BNNQuantizer")
-        train_models(resnet=False, quantizer="QAT_Quantizer")
-        train_models(resnet=False, quantizer="DoReFaQuantizer")
-
-    elif sys.argv[1] == "quantize":
+    elif args.quantize:
         device = torch.device("cpu")
         quantize(device, "NaiveQuantizer", resnet=False)
         quantize(device, "BNNQuantizer", resnet=False)
@@ -704,13 +711,13 @@ if __name__ == "__main__":
         quantize(device, "DoReFaQuantizer", resnet=True)
         quantize(device, "ObserverQuantizer", resnet=True)
 
-    elif sys.argv[1] == "figures":
+    elif args.figures:
         figures(device)
 
-    elif sys.argv[1] == "benchmark":
+    elif args.benchmark:
         benchmark(device, resnet=False)
         benchmark(device, resnet=True)
 
     else:
         print("Invalid argument")
-        print("Example usage: python3 proj1.py train")
+        print("Example usage: python3 proj2.py --train")

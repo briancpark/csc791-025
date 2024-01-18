@@ -33,8 +33,8 @@ conda install pytorch torchvision pytorch-cuda=11.7 -c pytorch-nightly -c nvidia
 First run `model.py` to download the datasets needed before running the HPO experiments
 
 ```sh
-python3 model.py no-vgg
-python3 model.py vgg
+python3 model.py
+python3 model.py --vgg
 ```
 
 Once done debugging and installing, run batch scripts on bridges-2. These experiments will take long, so interactive sessions won't cut it:
@@ -54,5 +54,6 @@ bash job-proj3
 Once done running experiments, you can view them individually:
 
 ```sh
-python3 proj3.py hpo view <experiment-id>
+python3 proj3.py --view <experiment-id>
+python3 proj3.py --hpo vgg advanced
 ```

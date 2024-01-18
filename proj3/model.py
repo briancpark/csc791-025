@@ -1,17 +1,19 @@
+"""PyTorch model for training on FashionMNIST dataset"""
+
+import argparse
+import os
 import nni
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
+from torchvision import models
 from torchvision import datasets
 from torchvision.transforms import ToTensor
-import torchvision.models as models
-import os
-import sys
 
-if sys.argv[1] == "vgg":
-    use_vgg = True
-else:
-    use_vgg = False
+
+# pylint: disable=redefined-outer-name,invalid-name,import-outside-toplevel
+# pylint: disable=too-many-arguments,too-many-locals,not-callable,too-many-branches
+# pylint: disable=too-many-statements,pointless-exception-statement,protected-access
 
 device = torch.device(
     "mps"
@@ -44,44 +46,23 @@ if torch.cuda.is_available():
     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
 
 
-optimized_params = nni.get_next_parameter()
-params.update(optimized_params)
-print(params)
-
 arc_env = os.path.exists("/mnt/beegfs/" + os.environ["USER"])
 a100_env = os.path.exists("/mnt/local/" + os.environ["USER"])
 
 if a100_env:
-    dir = "/mnt/local/" + os.environ["USER"] + "/data/"
+    data_dir = "/mnt/local/" + os.environ["USER"] + "/data/"
 elif arc_env:
-    dir = "/mnt/beegfs/" + os.environ["USER"] + "/data/"
+    data_dir = "/mnt/beegfs/" + os.environ["USER"] + "/data/"
 else:
-    dir = "data"
-
-if use_vgg:
-    training_data = datasets.CIFAR10(
-        root=dir, train=True, download=True, transform=ToTensor()
-    )
-    test_data = datasets.CIFAR10(
-        root=dir, train=False, download=True, transform=ToTensor()
-    )
-else:
-    training_data = datasets.FashionMNIST(
-        root=dir, train=True, download=True, transform=ToTensor()
-    )
-    test_data = datasets.FashionMNIST(
-        root=dir, train=False, download=True, transform=ToTensor()
-    )
-
-batch_size = params["batch_size"]
-
-train_dataloader = DataLoader(training_data, batch_size=batch_size)
-test_dataloader = DataLoader(test_data, batch_size=batch_size)
+    data_dir = "data"
 
 
 class MLP(nn.Module):
+    """MLP Model"""
+
     def __init__(self):
-        super(MLP, self).__init__()
+        """Initialize the model"""
+        super().__init__()
         self.flatten = nn.Flatten()
         self.linear_relu_stack = nn.Sequential(
             nn.Linear(28 * 28, params["features"]),
@@ -92,26 +73,16 @@ class MLP(nn.Module):
         )
 
     def forward(self, x):
+        """Forward pass"""
         x = self.flatten(x)
         logits = self.linear_relu_stack(x)
         return logits
 
 
-if use_vgg:
-    model = models.vgg11().to(device)
-else:
-    model = MLP().to(device)
-
-loss_fn = nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(
-    model.parameters(), lr=params["lr"], momentum=params["momentum"]
-)
-
-
 def train(dataloader, model, loss_fn, optimizer):
-    size = len(dataloader.dataset)
+    """Training loop"""
     model.train()
-    for batch, (X, y) in enumerate(dataloader):
+    for _, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
         pred = model(X)
         loss = loss_fn(pred, y)
@@ -121,6 +92,7 @@ def train(dataloader, model, loss_fn, optimizer):
 
 
 def test(dataloader, model, loss_fn):
+    """Test loop"""
     size = len(dataloader.dataset)
     num_batches = len(dataloader)
     model.eval()
@@ -136,13 +108,54 @@ def test(dataloader, model, loss_fn):
     return correct
 
 
-if use_vgg:
-    epochs = 20
-else:
-    epochs = 10
-for t in range(epochs):
-    print(f"Epoch {t+1}\n-------------------------------")
-    train(train_dataloader, model, loss_fn, optimizer)
-    accuracy = test(test_dataloader, model, loss_fn)
-    nni.report_intermediate_result(accuracy)
-nni.report_final_result(accuracy)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Process some integers.")
+    parser.add_argument("--vgg", action="store_true", help="Train vgg")
+
+    args = parser.parse_args()
+
+    use_vgg = args.vgg
+
+    optimized_params = nni.get_next_parameter()
+    params.update(optimized_params)
+    print(params)
+    if use_vgg:
+        training_data = datasets.CIFAR10(
+            root=data_dir, train=True, download=True, transform=ToTensor()
+        )
+        test_data = datasets.CIFAR10(
+            root=data_dir, train=False, download=True, transform=ToTensor()
+        )
+    else:
+        training_data = datasets.FashionMNIST(
+            root=data_dir, train=True, download=True, transform=ToTensor()
+        )
+        test_data = datasets.FashionMNIST(
+            root=data_dir, train=False, download=True, transform=ToTensor()
+        )
+
+    batch_size = params["batch_size"]
+
+    train_dataloader = DataLoader(training_data, batch_size=batch_size)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size)
+
+    if use_vgg:
+        model = models.vgg11().to(device)
+    else:
+        model = MLP().to(device)
+
+    loss_fn = nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(
+        model.parameters(), lr=params["lr"], momentum=params["momentum"]
+    )
+
+    if use_vgg:
+        epochs = 20
+    else:
+        epochs = 10
+    for t in range(epochs):
+        print(f"Epoch {t+1}\n-------------------------------")
+        train(train_dataloader, model, loss_fn, optimizer)
+        accuracy = test(test_dataloader, model, loss_fn)
+        nni.report_intermediate_result(accuracy)
+    nni.report_final_result(accuracy)

@@ -1,4 +1,4 @@
-from __future__ import print_function
+"""Accelerating Video Super Resolution for Mobile Device"""
 
 import argparse
 import csv
@@ -13,23 +13,40 @@ from os.path import join
 
 import numpy as np
 import pandas as pd
+
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.utils.data as data
+from torch import nn
+from torch import optim
+from torch.utils import data
+from torch.utils.data import DataLoader
+
 import matplotlib.pyplot as plt
-from torchvision.io import read_image, ImageReadMode
+
+from torchvision.io import read_image
 from torchvision.utils import save_image
 from torchvision.transforms.functional import InterpolationMode
+from torchvision.transforms import Compose, CenterCrop, Resize, ToTensor
+
+
 from PIL import Image
-from nni.compression.pytorch.pruning import *
+from nni.compression.pytorch.pruning import (
+    LevelPruner,
+    L1NormPruner,
+    L2NormPruner,
+    FPGMPruner,
+    ActivationAPoZRankPruner,
+    ActivationMeanRankPruner,
+    TaylorFOWeightPruner,
+    ADMMPruner,
+)
 from nni.compression.pytorch.speedup import ModelSpeedup
 from six.moves import urllib
-from torch.utils.data import DataLoader
-from torchvision.transforms import Compose, CenterCrop, Resize
-from torchvision.transforms import ToTensor
 from torchviz import make_dot
 from tqdm import tqdm
+
+# pylint: disable=redefined-outer-name,invalid-name,import-outside-toplevel,too-many-lines
+# pylint: disable=too-many-arguments,too-many-locals,not-callable,too-many-branches
+# pylint: disable=too-many-statements,pointless-exception-statement,protected-access
 
 from model import (
     FMEN,
@@ -58,15 +75,16 @@ model_prune_config = {
     "FMEN": [],
     "VDSR": [],
     "RDN": [],  # OOM
-    "SuperResolutionByteDance": ["fea_conv", "upsampler.0", "LR_conv"],  # Not working
+    # Not working
+    "SuperResolutionByteDance": ["fea_conv", "upsampler.0", "LR_conv"],
     "SuperResolutionTwitter": ["conv4"],
     "WDSR": ["body.17", "skip.0", "body.0"],  # Other error
     "IMDN": ["RM.0"],  # TypeError
     "RFDN": ["c.0", "LR_conv", "upsampler.0", "fea_conv"],  # mask conflict
 }
 
-### Inference Variables
-USE_EXTERNAL_STORAGE = True if os.environ.get("PROJECT") else False
+# Inference Variables
+USE_EXTERNAL_STORAGE = bool(os.environ.get("PROJECT"))
 
 
 device = torch.device(
@@ -82,22 +100,25 @@ print("Using device:", device.type.upper())
 if not os.path.exists("logs"):
     os.mkdir("logs")
 
-
-### COLOR CONVERSIONS
-"""
-Y  = R *  0.29900 + G *  0.58700 + B *  0.11400
-Cb = R * -0.16874 + G * -0.33126 + B *  0.50000 + 128
-Cr = R *  0.50000 + G * -0.41869 + B * -0.08131 + 128
-
-R  = Y +                       + (Cr - 128) *  1.40200
-G  = Y + (Cb - 128) * -0.34414 + (Cr - 128) * -0.71414
-B  = Y + (Cb - 128) *  1.77200
-
-SOURCE: https://github.com/python-pillow/Pillow/blob/main/src/libImaging/ConvertYCbCr.c
-"""
+if not os.path.exists("models"):
+    os.mkdir("models")
 
 
 def rgb_to_ycbcr(image):
+    """
+    Converts an RGB image to YCbCr
+
+    COLOR CONVERSIONS
+    Y  = R *  0.29900 + G *  0.58700 + B *  0.11400
+    Cb = R * -0.16874 + G * -0.33126 + B *  0.50000 + 128
+    Cr = R *  0.50000 + G * -0.41869 + B * -0.08131 + 128
+
+    R  = Y +                       + (Cr - 128) *  1.40200
+    G  = Y + (Cb - 128) * -0.34414 + (Cr - 128) * -0.71414
+    B  = Y + (Cb - 128) *  1.77200
+
+    SOURCE: https://github.com/python-pillow/Pillow/blob/main/src/libImaging/ConvertYCbCr.c
+    """
     with torch.no_grad():
         if image.max() < 1.0:
             image = image * 255.0
@@ -117,6 +138,7 @@ def rgb_to_ycbcr(image):
 
 
 def ycbcr_to_rgb(image):
+    """Converts a YCbCr image to RGB"""
     with torch.no_grad():
         if image.max() < 1:
             image = image * 255.0
@@ -134,10 +156,12 @@ def ycbcr_to_rgb(image):
 
 
 def is_image_file(filename):
+    """Checks if a file is an image"""
     return any(filename.endswith(extension) for extension in [".png", ".jpg", ".jpeg"])
 
 
 def load_img(filepath, ycbcr=True):
+    """Loads an image"""
     if ycbcr:
         img = Image.open(filepath).convert("YCbCr")
         y, _, _ = img.split()
@@ -147,17 +171,20 @@ def load_img(filepath, ycbcr=True):
         # img = read_image(filepath, mode=ImageReadMode.RGB)
         # y = rgb_to_ycbcr(img)[0:1]
         # return y
-    else:
-        # TODO: convert to PyTorch
-        img = Image.open(filepath).convert("RGB")
-        return img
+
+    # TODO: convert to PyTorch
+    img = Image.open(filepath).convert("RGB")
+    return img
 
 
 class DatasetFromFolder(data.Dataset):
+    """Loads a dataset from a folder"""
+
     def __init__(
         self, image_dir, input_transform=None, target_transform=None, ycbcr=True
     ):
-        super(DatasetFromFolder, self).__init__()
+        """Initializes the dataset"""
+        super().__init__()
         self.image_filenames = [
             join(image_dir, x) for x in listdir(image_dir) if is_image_file(x)
         ]
@@ -167,23 +194,24 @@ class DatasetFromFolder(data.Dataset):
         self.ycbcr = ycbcr
 
     def __getitem__(self, index):
-        input = load_img(self.image_filenames[index], ycbcr=self.ycbcr)
+        x = load_img(self.image_filenames[index], ycbcr=self.ycbcr)
 
-        target = input.copy()  # This is for PIL
-        # target = input.clone() # This is for torchvision
+        target = x.copy()  # This is for PIL
+        # target = x.clone() # This is for torchvision
 
         if self.input_transform:
-            input = self.input_transform(input)
+            x = self.input_transform(x)
         if self.target_transform:
             target = self.target_transform(target)
 
-        return input, target
+        return x, target
 
     def __len__(self):
         return len(self.image_filenames)
 
 
 def download_bsd300(dest="data"):
+    """Downloads the BSD300 dataset"""
     output_image_dir = join(dest, "BSDS300/images")
 
     if not exists(output_image_dir):
@@ -191,11 +219,10 @@ def download_bsd300(dest="data"):
         url = "http://www2.eecs.berkeley.edu/Research/Projects/CS/vision/bsds/BSDS300-images.tgz"
         print("downloading url ", url)
 
-        data = urllib.request.urlopen(url)
-
-        file_path = join(dest, basename(url))
-        with open(file_path, "wb") as f:
-            f.write(data.read())
+        with urllib.request.urlopen(url) as data:
+            file_path = join(dest, basename(url))
+            with open(file_path, "wb") as f:
+                f.write(data.read())
 
         print("Extracting data")
         with tarfile.open(file_path) as tar:
@@ -208,10 +235,12 @@ def download_bsd300(dest="data"):
 
 
 def calculate_valid_crop_size(crop_size, upscale_factor):
+    """Calculates a valid crop size based on the upscale factor"""
     return crop_size - (crop_size % upscale_factor)
 
 
 def input_transform(crop_size, upscale_factor):
+    """Transforms the input image"""
     return Compose(
         [
             CenterCrop(crop_size),
@@ -222,6 +251,7 @@ def input_transform(crop_size, upscale_factor):
 
 
 def target_transform(crop_size):
+    """Transforms the target image"""
     return Compose(
         [
             CenterCrop(crop_size),
@@ -231,6 +261,7 @@ def target_transform(crop_size):
 
 
 def get_training_set(upscale_factor, ycbcr=True):
+    """Gets the training set"""
     root_dir = download_bsd300()
     train_dir = join(root_dir, "train")
     crop_size = calculate_valid_crop_size(256, upscale_factor)
@@ -244,6 +275,7 @@ def get_training_set(upscale_factor, ycbcr=True):
 
 
 def get_test_set(upscale_factor, ycbcr=True):
+    """Gets the test set"""
     root_dir = download_bsd300()
     test_dir = join(root_dir, "test")
     crop_size = calculate_valid_crop_size(256, upscale_factor)
@@ -257,108 +289,89 @@ def get_test_set(upscale_factor, ycbcr=True):
 
 
 def train(data_loader, model, criterion, optimizer, epoch):
+    """Trains the model"""
     epoch_loss = 0
-    for iteration, batch in enumerate(data_loader, 1):
-        input, target = batch[0].to(device), batch[1].to(device)
+    for _, batch in enumerate(data_loader, 1):
+        x, target = batch[0].to(device), batch[1].to(device)
 
         optimizer.zero_grad()
-        output = model(input)
+        output = model(x)
         loss = criterion(output, target)
         epoch_loss += loss.item()
         loss.backward()
         optimizer.step()
 
     print(
-        "===> Epoch {} Complete: Avg. Loss: {:.4f}".format(
-            epoch, epoch_loss / len(data_loader)
-        )
+        f"===> Epoch {epoch} Complete: Avg. Loss: {epoch_loss / len(data_loader):.4f}"
     )
 
     return epoch_loss / len(data_loader)
 
 
 def test(data_loader, model, criterion):
+    """Tests the model"""
     avg_psnr = 0
     with torch.no_grad():
         for batch in data_loader:
-            input, target = batch[0].to(device), batch[1].to(device)
+            x, target = batch[0].to(device), batch[1].to(device)
 
-            prediction = model(input)
+            prediction = model(x)
             mse = criterion(prediction, target)
             psnr = 10 * log10(1 / mse.item())
             avg_psnr += psnr
-    print("===> Avg. PSNR: {:.4f} dB".format(avg_psnr / len(data_loader)))
+    print(f"===> Avg. PSNR: {avg_psnr / len(data_loader):.4f} dB")
 
     return avg_psnr / len(data_loader)
 
 
 def checkpoint(epoch, model, upscale_factor, prefix="original", sparsity=0):
+    """Saves the model"""
     if sparsity:
         if USE_EXTERNAL_STORAGE:
             PROJECT_DIR = os.environ.get("PROJECT")
             os.makedirs(
-                "{}/models/{}/{}/{}/{}".format(
-                    PROJECT_DIR,
-                    model.__class__.__name__,
-                    prefix,
-                    upscale_factor,
-                    sparsity,
-                ),
+                f"{PROJECT_DIR}/models/{model.__class__.__name__}\
+                    /{prefix}/{upscale_factor}/{sparsity}",
                 exist_ok=True,
             )
-            model_out_path = "{}/models/{}/{}/{}/{}/model_epoch_{}.pth".format(
-                PROJECT_DIR,
-                model.__class__.__name__,
-                prefix,
-                upscale_factor,
-                sparsity,
-                epoch,
-            )
+            model_out_path = f"{PROJECT_DIR}/models/{model.__class__.__name__}\
+                /{prefix}/{upscale_factor}/{sparsity}/model_epoch_{epoch}.pth"
         else:
             os.makedirs(
-                "models/{}/{}/{}/{}".format(
-                    model.__class__.__name__, prefix, upscale_factor, sparsity
-                ),
+                f"models/{model.__class__.__name__}/{prefix}/{upscale_factor}/{sparsity}",
                 exist_ok=True,
             )
-            model_out_path = "models/{}/{}/{}/{}/model_epoch_{}.pth".format(
-                model.__class__.__name__, prefix, upscale_factor, sparsity, epoch
-            )
+            model_out_path = f"models/{model.__class__.__name__}\
+                /{prefix}/{upscale_factor}/{sparsity}/model_epoch_{epoch}.pth"
     else:
         if USE_EXTERNAL_STORAGE:
             PROJECT_DIR = os.environ.get("PROJECT")
             os.makedirs(
-                "{}/models/{}/{}/{}".format(
-                    PROJECT_DIR, model.__class__.__name__, prefix, upscale_factor
-                ),
+                f"{PROJECT_DIR}/models/{model.__class__.__name__}/{prefix}/{upscale_factor}",
                 exist_ok=True,
             )
-            model_out_path = "{}/models/{}/{}/{}/model_epoch_{}.pth".format(
-                PROJECT_DIR, model.__class__.__name__, prefix, upscale_factor, epoch
-            )
+            model_out_path = f"{PROJECT_DIR}/models/{model.__class__.__name__}\
+                /{prefix}/{upscale_factor}/model_epoch_{epoch}.pth"
         else:
             os.makedirs(
-                "models/{}/{}/{}".format(
-                    model.__class__.__name__, prefix, upscale_factor
-                ),
+                f"models/{model.__class__.__name__}/{prefix}/{upscale_factor}",
                 exist_ok=True,
             )
-            model_out_path = "models/{}/{}/{}/model_epoch_{}.pth".format(
-                model.__class__.__name__, prefix, upscale_factor, epoch
-            )
+            model_out_path = f"models/{model.__class__.__name__}/{prefix}\
+                /{upscale_factor}/model_epoch_{epoch}.pth"
     torch.save(model, model_out_path)
-    print("Checkpoint saved to {}".format(model_out_path))
+    print(f"Checkpoint saved to {model_out_path}")
 
 
-# Function helper for inference
 def super_resolution(model, img, upscale_factor):
+    """Function helper for inference"""
     ycbcr = model_config[model.__class__.__name__]
 
     if not ycbcr:
         ycbcr_img = rgb_to_ycbcr(img)
 
         # Deconstruct ycbcr_img
-        input = ycbcr_img[0].unsqueeze(0)
+        x = ycbcr_img[0].unsqueeze(0)
 
         # Retain Cb and Cr channels for reconstruction later
         cb = ycbcr_img[1].unsqueeze(0)
@@ -372,9 +385,9 @@ def super_resolution(model, img, upscale_factor):
         out_img_cr = upscale(cr)
 
         # Upscale Y channel
-        input = input.unsqueeze(0)
+        x = input.unsqueeze(0)
         # input MUST be formatted as size (1, 1, H, W)
-        out = model(input)
+        out = model(x)
 
         out_img_y = out * 255.0
         out_img_y = out_img_y.clip(0, 255)
@@ -393,13 +406,11 @@ def super_resolution(model, img, upscale_factor):
         output = output.type(torch.uint8)
         output = output / 255.0
         return output
-    else:
-        # TODO: Implement for RGB
-        pass
+    return None
 
 
 def inference(model_path, upscale_factor, sparsity, pruner="original"):
-    # This performs inference on the test dataset
+    """This performs inference on the test dataset"""
 
     model = torch.load(model_path, map_location=device)
     ycbcr = model_config[model.__class__.__name__]
@@ -411,50 +422,34 @@ def inference(model_path, upscale_factor, sparsity, pruner="original"):
         if USE_EXTERNAL_STORAGE:
             PROJECT_DIR = os.environ.get("PROJECT")
             os.makedirs(
-                "{}/results/{}/{}/{}".format(
-                    PROJECT_DIR, model.__class__.__name__, pruner, upscale_factor
-                ),
+                f"{PROJECT_DIR}/results/{model.__class__.__name__}/{pruner}/{upscale_factor}",
                 exist_ok=True,
             )
-            output_dir = "{}/results/{}/{}/{}".format(
-                PROJECT_DIR, model.__class__.__name__, pruner, upscale_factor
-            )
+            output_dir = f"{PROJECT_DIR}/results/{model.__class__.__name__}\
+                /{pruner}/{upscale_factor}"
         else:
             os.makedirs(
-                "results/{}/{}/{}".format(
-                    model.__class__.__name__, pruner, upscale_factor
-                ),
+                f"results/{model.__class__.__name__}/{pruner}/{upscale_factor}",
                 exist_ok=True,
             )
-            output_dir = "results/{}/{}/{}".format(
-                model.__class__.__name__, pruner, upscale_factor
-            )
+            output_dir = f"results/{model.__class__.__name__}/{pruner}/{upscale_factor}"
     else:
         if USE_EXTERNAL_STORAGE:
             PROJECT_DIR = os.environ.get("PROJECT")
             os.makedirs(
-                "{}/results/{}/{}/{}/{}".format(
-                    PROJECT_DIR,
-                    model.__class__.__name__,
-                    pruner,
-                    upscale_factor,
-                    sparsity,
-                ),
+                f"{PROJECT_DIR}/results/{model.__class__.__name__}\
+                    /{pruner}/{upscale_factor}/{sparsity}",
                 exist_ok=True,
             )
-            output_dir = "{}/results/{}/{}/{}/{}".format(
-                PROJECT_DIR, model.__class__.__name__, pruner, upscale_factor, sparsity
-            )
+            output_dir = f"{PROJECT_DIR}/results/{model.__class__.__name__}\
+                /{pruner}/{upscale_factor}/{sparsity}"
         else:
             os.makedirs(
-                "results/{}/{}/{}/{}".format(
-                    model.__class__.__name__, pruner, upscale_factor, sparsity
-                ),
+                f"results/{model.__class__.__name__}/{pruner}/{upscale_factor}/{sparsity}",
                 exist_ok=True,
             )
-            output_dir = "results/{}/{}/{}/{}".format(
-                model.__class__.__name__, pruner, upscale_factor, sparsity
-            )
+            output_dir = f"results/{model.__class__.__name__}\
+                /{pruner}/{upscale_factor}/{sparsity}"
 
     for img_name in tqdm(os.listdir(test_dir)):
         filename = os.path.join(test_dir, img_name)
@@ -465,13 +460,13 @@ def inference(model_path, upscale_factor, sparsity, pruner="original"):
             out = super_resolution(model, img, upscale_factor)
             save_image(out, output_filename)
         elif ycbcr:
-            ### TODO: Bluriness is not the issue here, must be training
+            # TODO: Bluriness is not the issue here, must be training
             img = Image.open(filename).convert("YCbCr")
             y, cb, cr = img.split()
             img_to_tensor = ToTensor()
-            input = img_to_tensor(y).view(1, -1, y.size[1], y.size[0]).to(device)
+            x = img_to_tensor(y).view(1, -1, y.size[1], y.size[0]).to(device)
 
-            out = model(input)
+            out = model(x)
             out = out.cpu()
             out_img_y = out[0].detach().numpy()
             out_img_y *= 255.0
@@ -491,11 +486,11 @@ def inference(model_path, upscale_factor, sparsity, pruner="original"):
             # TODO: clean up this mass
             img = Image.open(filename)
             img_to_tensor = ToTensor()
-            input = img_to_tensor(img).view(1, -1, img.size[1], img.size[0])
+            x = img_to_tensor(img).view(1, -1, img.size[1], img.size[0])
 
-            input = input.to(device)
+            x = x.to(device)
 
-            out = model(input)
+            out = model(x)
 
             # post process
             out = out.cpu()
@@ -518,6 +513,7 @@ def training(
     logging,
     model_name,
 ):
+    """This trains the model"""
     if model_name == "FMEN":  # Gradient error
         model = FMEN(upscale_factor=upscale_factor).to(device)  # DOESN'T WORK
     elif model_name == "VDSR":
@@ -565,6 +561,7 @@ def training(
             f"logs/original_{upscale_factor}_{model.__class__.__name__ }.csv",
             "w",
             newline="",
+            encoding="utf-8",
         ) as fh:
             writer = csv.writer(fh)
             writer.writerow(["epoch", "train_psnr", "test_psnr", "train_loss"])
@@ -578,13 +575,16 @@ def training(
 
         if logging:
             with open(
-                f"logs/original_{upscale_factor}_{model.__class__.__name__ }.csv", "a"
+                f"logs/original_{upscale_factor}_{model.__class__.__name__ }.csv",
+                "a",
+                encoding="utf-8",
             ) as fh:
                 writer = csv.writer(fh)
                 writer.writerow([epoch, train_psnr, test_psnr, train_loss])
 
 
 def visualize(upscale_factor):
+    """Visualizes the model"""
     models = [
         FMEN,
         RDN,
@@ -600,19 +600,20 @@ def visualize(upscale_factor):
         model = model(upscale_factor=upscale_factor)
         ycbcr = model_config[model.__class__.__name__]
         channels = 1 if ycbcr else 3
-        input = torch.randn(1, channels, 300, 300)
-        output = model(input)
+        x = torch.randn(1, channels, 300, 300)
+        output = model(x)
 
         make_dot(output, params=dict(list(model.named_parameters()))).render(
             f"figures/{model.__class__.__name__}", format="png"
         )
 
 
-def quantization(upscale_factor):
+def quantization(upscale_factor, logging):
+    """Quantizes the model"""
     from nni.algorithms.compression.pytorch.quantization import QAT_Quantizer
 
-    train_set = get_training_set(args.upscale_factor)
-    test_set = get_test_set(args.upscale_factor)
+    train_set = get_training_set(upscale_factor)
+    test_set = get_test_set(upscale_factor)
 
     training_data_loader = DataLoader(
         dataset=train_set,
@@ -646,7 +647,9 @@ def quantization(upscale_factor):
 
     # Initialize logging
     if logging:
-        with open(f"logs/{model.__class__.__name__}.csv", "w", newline="") as fh:
+        with open(
+            f"logs/{model.__class__.__name__}.csv", "w", newline="", encoding="utf-8"
+        ) as fh:
             writer = csv.writer(fh)
             writer.writerow(["epoch", "train_psnr", "test_psnr", "train_loss"])
 
@@ -658,7 +661,9 @@ def quantization(upscale_factor):
         scheduler.step()
 
         if logging:
-            with open(f"logs/{model.__class__.__name__}.csv", "a") as fh:
+            with open(
+                f"logs/{model.__class__.__name__}.csv", "a", encoding="utf-8"
+            ) as fh:
                 writer = csv.writer(fh)
                 writer.writerow([epoch, train_psnr, test_psnr, train_loss])
 
@@ -666,7 +671,7 @@ def quantization(upscale_factor):
     calibration_path = "logs/mnist_calibration.pth"
     calibration_config = quantizer.export_model(model_path, calibration_path)
 
-    print("calibration_config: ", calibration_config)
+    print(f"calibration_config: {calibration_config}")
 
     from nni.compression.pytorch.quantization_speedup import ModelSpeedupTensorRT
 
@@ -691,6 +696,7 @@ def prune(
     logging,
     pruner,
 ):
+    """Prunes the model"""
     opt_pruners = {
         "LevelPruner": LevelPruner,
         "L1NormPruner": L1NormPruner,
@@ -731,7 +737,7 @@ def prune(
     for _ in range(trials):
         torch.cuda.synchronize()
         start.record()
-        fake_output = model(fake_input)
+        _ = model(fake_input)
         end.record()
 
         torch.cuda.synchronize()
@@ -748,11 +754,7 @@ def prune(
     pruner = opt_pruners[pruner](model, config_list)
     _, masks = pruner.compress()
     for name, mask in masks.items():
-        print(
-            name,
-            " sparsity : ",
-            "{:.2}".format(mask["weight"].sum() / mask["weight"].numel()),
-        )
+        print(f"{name} sparsity : {mask['weight'].sum() / mask['weight'].numel():.2f}")
     pruner._unwrap_model()
 
     ModelSpeedup(model, torch.rand(1, 1, 300, 300).to(device), masks).speedup_model()
@@ -760,7 +762,7 @@ def prune(
     for _ in range(trials):
         torch.cuda.synchronize()
         start.record()
-        fake_output = model(fake_input)
+        _ = model(fake_input)
         end.record()
 
         torch.cuda.synchronize()
@@ -777,6 +779,7 @@ def prune(
             f"logs/{pruner.__class__.__name__}_{upscale_factor}_{model.__class__.__name__ }.csv",
             "w",
             newline="",
+            encoding="utf-8",
         ) as fh:
             writer = csv.writer(fh)
             writer.writerow(["epoch", "train_psnr", "test_psnr", "train_loss"])
@@ -799,17 +802,20 @@ def prune(
             with open(
                 f"logs/{pruner.__class__.__name__}_{upscale_factor}_{model.__class__.__name__ }.csv",
                 "a",
+                encoding="utf-8",
             ) as fh:
                 writer = csv.writer(fh)
                 writer.writerow([epoch, train_psnr, test_psnr, train_loss])
 
 
 def benchmark(upscale_factor, model_path):
-    ### Warm Up CUDA runtime
+    """Benchmarks the model"""
+
+    # Warm Up CUDA runtime
     A = torch.randn(2048, 2048).to(device)
     B = torch.randn(2048, 2048).to(device)
     for _ in range(100):
-        A @ B
+        A = A @ B
 
     model = torch.load(model_path, map_location=device)
 
@@ -837,7 +843,7 @@ def benchmark(upscale_factor, model_path):
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
 
-        for data_loader in [training_data_loader, testing_data_loader]:
+        for _ in [training_data_loader, testing_data_loader]:
             for data, _ in testing_data_loader:
                 data = data.to(device)
 
@@ -849,7 +855,7 @@ def benchmark(upscale_factor, model_path):
 
                 inference_times.append(start.elapsed_time(end) / 1000)
     else:
-        for data_loader in [training_data_loader, testing_data_loader]:
+        for _ in [training_data_loader, testing_data_loader]:
             for data, _ in testing_data_loader:
                 data = data.to(device)
 
@@ -872,7 +878,7 @@ def benchmark(upscale_factor, model_path):
         high_resolution_y // upscale_factor,
     )
 
-    input = torch.randn(1, channels, low_resolution_x, low_resolution_y).to(device)
+    x = torch.randn(1, channels, low_resolution_x, low_resolution_y).to(device)
     inference_times = []
 
     if torch.cuda.is_available():
@@ -881,7 +887,7 @@ def benchmark(upscale_factor, model_path):
 
         for _ in range(1000):
             start.record()
-            _ = model(input)
+            _ = model(x)
             end.record()
 
             torch.cuda.synchronize()
@@ -890,7 +896,7 @@ def benchmark(upscale_factor, model_path):
     else:
         for _ in range(1000):
             tik = time.perf_counter()
-            _ = model(input)
+            _ = model(x)
             tok = time.perf_counter()
             inference_times.append(tok - tik)
 
@@ -902,7 +908,6 @@ def benchmark(upscale_factor, model_path):
 
     if False:
         # Run TensorRT benchmark
-        import torch_tensorrt
 
         input_ = torch.randn(1, 1, 640, 360).to(device)
         trt_ts_module = torch.jit.load(f"tensorrt_models/{model.__class__.__name__}.ts")
@@ -913,7 +918,7 @@ def benchmark(upscale_factor, model_path):
 
         for _ in range(1000):
             start.record()
-            result = trt_ts_module(input_)
+            _ = trt_ts_module(input_)
             end.record()
 
             torch.cuda.synchronize()
@@ -969,7 +974,7 @@ def benchmark(upscale_factor, model_path):
 
         for _ in range(1000):
             start.record()
-            ort_outs = ort_session.run(None, ort_inputs)
+            _ = ort_session.run(None, ort_inputs)
             end.record()
 
             torch.cuda.synchronize()
@@ -1008,15 +1013,13 @@ def benchmark(upscale_factor, model_path):
 
 
 def demo(upscale_factor, model_path, frame_path):
+    """This performs inference on the test dataset"""
     ycbcr = True  # TODO:(bcp) add ycbcr option
     channels = 1 if ycbcr else 3
 
     model = torch.load(model_path, map_location=device)
 
     sr_frame_path = frame_path + "_sr"
-
-    images = []
-    sr_images = []
 
     for frame in tqdm(os.listdir(frame_path)):
         fp = os.path.join(frame_path, frame)
@@ -1026,9 +1029,9 @@ def demo(upscale_factor, model_path, frame_path):
         img = Image.open(fp).convert("YCbCr")
         y, cb, cr = img.split()
         img_to_tensor = ToTensor()
-        input = img_to_tensor(y).view(1, -1, y.size[1], y.size[0]).to(device)
+        x = img_to_tensor(y).view(1, -1, y.size[1], y.size[0]).to(device)
 
-        out = model(input)
+        out = model(x)
         out = out.cpu()
         out_img_y = out[0].detach().numpy()
         out_img_y *= 255.0
@@ -1082,7 +1085,8 @@ def demo(upscale_factor, model_path, frame_path):
 
 
 def demo_slides(upscale_factor, model_path, frame_path):
-    model = torch.load(model_path, map_location=device)
+    """Prepare some images for slides"""
+    _ = torch.load(model_path, map_location=device)
 
     img_path = "data/BSDS300/images/test/3096.jpg"
 
@@ -1094,15 +1098,16 @@ def demo_slides(upscale_factor, model_path, frame_path):
     b_img = torch.stack([null_channel, img[1:2] / 255.0, null_channel], dim=1)
     g_img = torch.stack([null_channel, null_channel, img[2:3] / 255.0], dim=1)
 
-    save_image(ycbcr_img[0:1], "y_img.png")
-    save_image(ycbcr_img[1:2], "cb_img.png")
-    save_image(ycbcr_img[2:3], "cr_img.png")
-    save_image(r_img, "r_img.png")
-    save_image(g_img, "g_img.png")
-    save_image(b_img, "b_img.png")
+    save_image(ycbcr_img[0:1], "figures/y_img.png")
+    save_image(ycbcr_img[1:2], "figures/cb_img.png")
+    save_image(ycbcr_img[2:3], "figures/cr_img.png")
+    save_image(r_img, "figures/r_img.png")
+    save_image(g_img, "figures/g_img.png")
+    save_image(b_img, "figures/b_img.png")
 
 
 def convert_to_onnx(model_path):
+    """Converts the model to ONNX"""
     # Pinning to opset 9, as DepthToSpace is broken in XGen for blocksize != 4
     opset_version = 9
 
@@ -1114,11 +1119,11 @@ def convert_to_onnx(model_path):
     ycbcr = model_config[model.__class__.__name__]
     channels = 1 if ycbcr else 3
 
-    input = torch.randn(1, channels, 270, 480)
+    x = torch.randn(1, channels, 270, 480)
 
     torch.onnx.export(
         model,
-        input,
+        x,
         f"onnx_models/{model.__class__.__name__}.onnx",
         do_constant_folding=True,
         input_names=["input"],
@@ -1129,6 +1134,7 @@ def convert_to_onnx(model_path):
 
 
 def convert_to_coreml(model_path):
+    """Converts the model to CoreML"""
     # https://coremltools.readme.io/docs/pytorch-conversion
     import coremltools as ct
 
@@ -1143,16 +1149,16 @@ def convert_to_coreml(model_path):
     channels = 1 if ycbcr else 3
 
     # Trace the model with random data.
-    input = torch.rand(1, channels, 270, 480)
-    traced_model = torch.jit.trace(torch_model, input)
-    out = traced_model(input)
+    x = torch.rand(1, channels, 270, 480)
+    traced_model = torch.jit.trace(torch_model, x)
+    _ = traced_model(x)
 
     # Using image_input in the inputs parameter:
     # Convert to Core ML program using the Unified Conversion API.
     model = ct.convert(
         traced_model,
         convert_to="mlprogram",
-        inputs=[ct.TensorType(shape=input.shape)],
+        inputs=[ct.TensorType(shape=x.shape)],
     )
 
     # Save the converted model.
@@ -1160,6 +1166,7 @@ def convert_to_coreml(model_path):
 
 
 def convert_to_tensorrt(model_path):
+    """Converts the model to TensorRT"""
     # https://pytorch.org/TensorRT/getting_started/getting_started_with_python_api.html
     import torch_tensorrt
 
@@ -1186,17 +1193,17 @@ def convert_to_tensorrt(model_path):
         model, inputs=inputs, enabled_precisions=enabled_precisions
     )
 
-    input = torch.randn(1, channels, 270, 480).to(device)
-    result = trt_ts_module(input)
+    x = torch.randn(1, channels, 270, 480).to(device)
+    trt_ts_module(x)
     torch.jit.save(trt_ts_module, f"tensorrt_models/{model.__class__.__name__}.ts")
 
     # Deployment application
     trt_ts_module = torch.jit.load(f"tensorrt_models/{model.__class__.__name__}.ts")
-    input = input.to(device)
-    result = trt_ts_module(input)
+    trt_ts_module(x)
 
 
 def convert_to_tvm(model_path):
+    """Converts the model to TVM"""
     # https://tvm.apache.org/docs/tutorial/tvmc_python.html
     from tvm.driver import tvmc
 
@@ -1218,10 +1225,11 @@ def convert_to_tvm(model_path):
         package_path=f"tvm_models/{torch_model.__class__.__name__}.tar",
     )  # Step 2: Compile
 
-    result = tvmc.run(package, device="cuda")  # Step 3: Run
+    tvmc.run(package, device="cuda")  # Step 3: Run
 
 
 def profile(upscale_factor):
+    """Profiles the model"""
     from deepspeed.profiling.flops_profiler import get_model_profile
 
     sr_models = [
@@ -1240,16 +1248,22 @@ def profile(upscale_factor):
                 1,
                 270,
                 480,
-            ),  # input shape to the model. If specified, the model takes a tensor with this shape as the only positional argument.
+            ),  # input shape to the model. If specified, the model takes a tensor
+            # with this shape as the only positional argument.
             args=None,  # list of positional arguments to the model.
             kwargs=None,  # dictionary of keyword arguments to the model.
-            print_profile=False,  # prints the model graph with the measured profile attached to each module
+            print_profile=False,
+            # prints the model graph with the measured profile attached to each
+            # module
             detailed=True,  # print the detailed profile
             module_depth=-1,  # depth into the nested modules, with -1 being the inner most modules
             top_modules=1,  # the number of top modules to print aggregated profile
             warm_up=10,  # the number of warm-ups before measuring the time of each module
-            as_string=True,  # print raw numbers (e.g. 1000) or as human-readable strings (e.g. 1k)
-            output_file=None,  # path to the output file. If None, the profiler prints to stdout.
+            as_string=True,
+            # print raw numbers (e.g. 1000) or as human-readable strings (e.g.
+            # 1k)
+            output_file=None,
+            # path to the output file. If None, the profiler prints to stdout.
             ignore_modules=None,
         )  # the list of modules to ignore in the profiling
         print(f"model: {model.__class__.__name__}")
@@ -1259,6 +1273,7 @@ def profile(upscale_factor):
 
 
 def plot():
+    """Plots the model"""
     # Plot PSNR of Original
     SuperResolutionTwitter_df = pd.read_csv(
         "logs/original_4_SuperResolutionTwitter.csv"
@@ -1313,12 +1328,12 @@ def plot():
         "ESPCN Pruned (S10e GPU)",
         "ESPCN Pruned (S10e CPU)",
         "ESPCN (iPhone)",
-        "ESPCN Prune (iPhone)",
+        "ESPCN Pruned (iPhone)",
     ]
 
     x_pos = np.arange(len(names))
 
-    fig, ax = plt.subplots(figsize=(20, 10))
+    _, ax = plt.subplots(figsize=(20, 10))
     bars = ax.bar(
         x_pos,
         inference_times,
@@ -1345,10 +1360,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", type=str, default="all")
     parser.add_argument(
-        "--model_path", type=str, default="models/original/model_epoch_99.pth"
+        "--model_path",
+        type=str,
+        default="models/SuperResolutionTwitter/original/4/model_epoch_100.pth",
     )
     parser.add_argument("--upscale_factor", type=int, default=4)
-    parser.add_argument("--sparsity", type=float, default=1.0)
+    parser.add_argument("--sparsity", type=float, default=0.6)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--test_batch_size", type=int, default=100)
     parser.add_argument("--trials", type=int, default=100)
@@ -1359,7 +1376,7 @@ if __name__ == "__main__":
     parser.add_argument("--momentum", type=float, default=0.5)
     parser.add_argument("--gamma", type=float, default=0.1)
     parser.add_argument("--logging", action="store_true", default=True)
-    parser.add_argument("--pruner", type=str, default="original")
+    parser.add_argument("--pruner", type=str, default="LevelPruner")
     parser.add_argument("--channels", type=int, default=3)
     parser.add_argument("--model_name", type=str, default="SuperResolutionTwitter")
     parser.add_argument(
@@ -1378,10 +1395,22 @@ if __name__ == "__main__":
             args.logging,
             args.model_name,
         )
-        inference()
+        inference(args.model_path, args.upscale_factor, args.sparsity, args.pruner)
         visualize(args.upscale_factor)
-        prune()
-        benchmark()
+        prune(
+            args.upscale_factor,
+            args.model_path,
+            args.sparsity,
+            args.batch_size,
+            args.test_batch_size,
+            args.step_size,
+            args.gamma,
+            args.finetune_epochs,
+            args.trials,
+            args.logging,
+            args.pruner,
+        )
+        benchmark(args.upscale_factor, args.model_path)
     elif args.mode == "training":
         training(
             args.upscale_factor,
@@ -1410,7 +1439,7 @@ if __name__ == "__main__":
             args.pruner,
         )
     elif args.mode == "quantization":
-        quantization(args)
+        quantization(args.upscale_factor, args.logging)
     elif args.mode == "benchmark":
         benchmark(args.upscale_factor, args.model_path)
     elif args.mode == "demo":
