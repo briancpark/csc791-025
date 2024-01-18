@@ -1,3 +1,0 @@
-[submodule "proj1/examples"]
-	path = proj1/examples
-	url = git@github.com:pytorch/examples.git
