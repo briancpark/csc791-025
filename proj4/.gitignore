@@ -1,3 +1,4 @@
 onnx_models
 tvm_models
 
+*.npz

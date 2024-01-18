@@ -34,19 +34,6 @@ To make code hardware agnostic and conveniently switch backends between differen
 device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
 ```
 
-To run jupyter notebook on ARC cluster with VSCode extension make sure to run these commands:
-
-```sh
-jupyter-notebook --ip=cXX *.ipynb
-module load cuda
-```
-
-Or run the script we created:
-
-```sh
-./run.sh
-```
-
 ## Running the Project
 
 To simply run everything, just run this command:
@@ -58,8 +45,8 @@ python3 proj1.py
 You can also run parts of the project individually. For example, training will take a very long time:
 
 ```sh
-python3 proj1.py train     # train DNNs
-python3 proj1.py prune     # prune DNNs
-python3 proj1.py figures   # plot figures for report
-python3 proj1.py benchmark # benchmark normal vs. pruned DNNs
+python3 proj1.py --train     # train DNNs
+python3 proj1.py --prune     # prune DNNs
+python3 proj1.py --figures   # plot figures for report
+python3 proj1.py --benchmark # benchmark normal vs. pruned DNNs
 ```

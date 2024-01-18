@@ -1,22 +1,38 @@
-import torch
-import sys
+"""Project 1: DNN Pruning via NNI"""
+
 import os
 import glob
 import time
+import argparse
+import torch
 
-import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
+from torch import nn
+from torch import optim
 from torch.optim import SGD
-from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
-from nni.compression.pytorch.pruning import *
+from torchvision import datasets, transforms
+from torchvision import models
+from nni.compression.pytorch.pruning import (
+    LevelPruner,
+    L1NormPruner,
+    L2NormPruner,
+    FPGMPruner,
+    SlimPruner,
+    ActivationAPoZRankPruner,
+    ActivationMeanRankPruner,
+    TaylorFOWeightPruner,
+    ADMMPruner,
+)
 from nni.compression.pytorch.speedup import ModelSpeedup
 from torchviz import make_dot
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
-import torchvision.models as models
+
+# pylint: disable=redefined-outer-name,invalid-name,import-outside-toplevel
+# pylint: disable=too-many-arguments,too-many-locals,not-callable
+# pylint: disable=too-many-statements,pointless-exception-statement,protected-access
 
 device = torch.device(
     "mps"
@@ -54,14 +70,18 @@ if torch.cuda.is_available():
     # in PyTorch 1.12 and later.
     torch.backends.cuda.matmul.allow_tf32 = True
 
-    # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
+    # The flag below controls whether to allow TF32 on cuDNN. This flag
+    # defaults to True.
     torch.backends.cudnn.allow_tf32 = True
 
-    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
+    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
 
 class Net(nn.Module):
+    """Very simple CNN for MNIST"""
+
     def __init__(self):
+        """Initialize the model"""
         super().__init__()
         self.conv1 = nn.Conv2d(1, 32, 3, 1)
         self.conv2 = nn.Conv2d(32, 64, 3, 1)
@@ -71,6 +91,7 @@ class Net(nn.Module):
         self.fc2 = nn.Linear(128, 10)
 
     def forward(self, x):
+        """Forward pass"""
         x = self.conv1(x)
         x = F.relu(x)
         x = self.conv2(x)
@@ -86,20 +107,23 @@ class Net(nn.Module):
         return output
 
 
-# For benchmarking purposes, we need to add synchronization primitives
 def touch():
+    """For benchmarking purposes, we need to add synchronization primitives"""
     if device.type == "cuda":
         torch.cuda.synchronize()
+    elif device.type == "mps":
+        torch.mps.synchronize()
 
 
 def train(model, device, train_loader, optimizer, criterion, epoch):
+    """Train the model"""
     model.train()
 
     t_iter = tqdm(
         train_loader, position=1, desc=str(epoch), leave=False, colour="yellow"
     )
 
-    for batch_idx, (data, target) in enumerate(t_iter):
+    for _, (data, target) in enumerate(t_iter):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
@@ -107,10 +131,11 @@ def train(model, device, train_loader, optimizer, criterion, epoch):
         loss.backward()
         optimizer.step()
 
-        t_iter.set_description("Loss: %.4f" % loss.item(), refresh=False)
+        t_iter.set_description(f"Loss: {loss.item():.4f}", refresh=False)
 
 
 def test(model, device, test_loader, criterion):
+    """Test the model"""
     model.eval()
     test_loss = 0
     correct = 0
@@ -131,10 +156,11 @@ def test(model, device, test_loader, criterion):
 
 
 def load_data(train_kwargs, test_kwargs, mnist=True):
+    """Load the data"""
     if arc_env:
-        dir = "/mnt/beegfs/" + os.environ["USER"] + "/data/"
+        data_dir = "/mnt/beegfs/" + os.environ["USER"] + "/data/"
     else:
-        dir = "data"
+        data_dir = "data"
 
     if mnist:
         # The transformations were copied from the PyTorch MNIST example
@@ -142,10 +168,13 @@ def load_data(train_kwargs, test_kwargs, mnist=True):
             [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
         )
 
-        dataset1 = datasets.MNIST(dir, train=True, download=True, transform=transform)
-        dataset2 = datasets.MNIST(dir, train=False, transform=transform)
+        dataset1 = datasets.MNIST(
+            data_dir, train=True, download=True, transform=transform
+        )
+        dataset2 = datasets.MNIST(data_dir, train=False, transform=transform)
     else:
-        # The transformations were copied from https://www.programcreek.com/python/example/105099/torchvision.datasets.CIFAR100
+        # The transformations were copied from
+        # https://www.programcreek.com/python/example/105099/torchvision.datasets.CIFAR100
         transform = transforms.Compose(
             [
                 transforms.RandomHorizontalFlip(),
@@ -158,8 +187,10 @@ def load_data(train_kwargs, test_kwargs, mnist=True):
             ]
         )
 
-        dataset1 = datasets.CIFAR10(dir, train=True, download=True, transform=transform)
-        dataset2 = datasets.CIFAR10(dir, train=False, transform=transform)
+        dataset1 = datasets.CIFAR10(
+            data_dir, train=True, download=True, transform=transform
+        )
+        dataset2 = datasets.CIFAR10(data_dir, train=False, transform=transform)
 
     train_loader = torch.utils.data.DataLoader(dataset1, **train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
@@ -168,10 +199,12 @@ def load_data(train_kwargs, test_kwargs, mnist=True):
 
 
 def train_models(resnet=False, retrain=False):
+    """Train the models"""
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
-    # If we're using NVIDIA, we can apply some more software/hardware optimizations if available
+    # If we're using NVIDIA, we can apply some more software/hardware
+    # optimizations if available
     if device.type == "cuda":
         cuda_kwargs = {"num_workers": num_cpus, "pin_memory": True, "shuffle": True}
         train_kwargs.update(cuda_kwargs)
@@ -192,7 +225,8 @@ def train_models(resnet=False, retrain=False):
 
     if resnet:
         # CIFAR-10 ResNet-101
-        # Reccomended hyperparameters are here: https://discuss.pytorch.org/t/resnet-with-cifar10-only-reaches-86-accuracy-expecting-90/135051
+        # Reccomended hyperparameters are here:
+        # https://discuss.pytorch.org/t/resnet-with-cifar10-only-reaches-86-accuracy-expecting-90/135051
         optimizer = SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=1e-4)
         scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[90, 135])
         criterion = nn.CrossEntropyLoss()
@@ -211,25 +245,26 @@ def train_models(resnet=False, retrain=False):
     ):
         train(model, device, train_loader, optimizer, criterion, epoch)
         _, _, _, accuracy = test(model, device, test_loader, criterion)
-        tqdm.write("Accuracy: %.4f" % accuracy)
+        tqdm.write(f"Accuracy: {accuracy:.4f}")
+
         scheduler.step()
 
-        ### Update the weights and save the model
+        # Update the weights and save the model
         torch.save(model, model_save_path)
 
     test_loss, correct, test_dataset_length, accuracy = test(
         model, device, test_loader, criterion
     )
     print(
-        "Average test loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)".format(
-            test_loss, correct, test_dataset_length, accuracy
-        )
+        f"Average test loss: {test_loss:.4f}, \
+        Accuracy: {correct}/{test_dataset_length} ({accuracy:.0f}%)"
     )
 
 
 def prune_helper(
     model, opt_pruner, train_loader, test_loader, sparsity, resnet, opt_pruner_name
 ):
+    """Prune helper function for distributed pruning"""
     if resnet:
         config_list = [
             {
@@ -260,11 +295,7 @@ def prune_helper(
     model, masks = pruner.compress()
     # show the masks sparsity
     for name, mask in masks.items():
-        print(
-            name,
-            " sparsity : ",
-            "{:.2}".format(mask["weight"].sum() / mask["weight"].numel()),
-        )
+        print(f"{name} sparsity: {mask['weight'].sum() / mask['weight'].numel():.2f}")
 
     # need to unwrap the model, if the model is wrapped before speedup
     pruner._unwrap_model()
@@ -290,33 +321,30 @@ def prune_helper(
         model, device, test_loader, criterion
     )
     tqdm.write(
-        "Average test loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)".format(
-            test_loss, correct, test_dataset_length, accuracy
-        )
+        f"Average test loss: {test_loss:.4f}, \
+        Accuracy: {correct}/{test_dataset_length} ({accuracy:.0f}%)"
     )
 
     # Save the models with their respective sparsities and pruning methods
     if resnet:
         torch.save(
             model,
-            "models/{0}/cifar10_resnet101_pruned_sparsity_{1}.pt".format(
-                opt_pruner_name,
-                int(sparsity * 100),
-            ),
+            f"models/{opt_pruner_name}/cifar10_resnet101_pruned_sparsity_{int(sparsity * 100)}.pt",
         )
     else:
         torch.save(
             model,
-            "models/{0}/mnist_cnn_pruned_sparsity_{1}.pt".format(
-                opt_pruner_name,
-                int(sparsity * 100),
-            ),
+            f"models/{opt_pruner_name}/mnist_cnn_pruned_sparsity_{int(sparsity * 100)}.pt",
         )
 
     return accuracy
 
 
 def prune(device, resnet=False, use_ray=False):
+    """
+    Prune the models
+    if use_ray is True, use Ray to parallelize the pruning process
+    """
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
@@ -341,21 +369,21 @@ def prune(device, resnet=False, use_ray=False):
     if use_ray:
         import ray
 
-        # TODO: Tune these parameters to liking depending on hardware environment
+        # Tune these parameters to liking depending on hardware environment
         ray.init(num_gpus=1, include_dashboard=False, num_cpus=num_cpus)
         r = ray.remote(num_gpus=0.25)
         remote_fn = r(prune_helper)
 
     opt_pruners = {
-        # "LevelPruner": LevelPruner,
-        "L1NormPruner": L1NormPruner,
-        # "L2NormPruner": L2NormPruner,
-        # "FPGMPruner": FPGMPruner,
-        # "SlimPruner": SlimPruner,
-        # "ActivationAPoZRankPruner": ActivationAPoZRankPruner,
-        # "ActivationMeanRankPruner": ActivationMeanRankPruner,
-        # "TaylorFOWeightPruner": TaylorFOWeightPruner,
-        # "ADMMPruner": ADMMPruner,
+        "LevelPruner": LevelPruner,
+        "L1NormPruner": L1NormPruner,  # Used in benchmark
+        "L2NormPruner": L2NormPruner,
+        "FPGMPruner": FPGMPruner,
+        "SlimPruner": SlimPruner,
+        "ActivationAPoZRankPruner": ActivationAPoZRankPruner,
+        "ActivationMeanRankPruner": ActivationMeanRankPruner,
+        "TaylorFOWeightPruner": TaylorFOWeightPruner,
+        "ADMMPruner": ADMMPruner,
     }
 
     for opt_pruner_name, opt_pruner in opt_pruners.items():
@@ -390,15 +418,12 @@ def prune(device, resnet=False, use_ray=False):
 
 
 def figures(device):
-    if device.type == "mps":
-        UserWarning("Cannot generate graphs on MPS mode, fallback to CPU")
-        device = torch.device("cpu")
-
+    """Plot the figures"""
     cnn_model = Net().to(device)
     resnet18_model = models.resnet18().to(device)
 
-    cnn_yhat = cnn_model(torch.rand(1, 1, 28, 28))
-    resnet18_yhat = resnet18_model(torch.rand(1, 3, 224, 224))
+    cnn_yhat = cnn_model(torch.rand(1, 1, 28, 28).to(device))
+    resnet18_yhat = resnet18_model(torch.rand(1, 3, 224, 224).to(device))
 
     make_dot(cnn_yhat, params=dict(list(cnn_model.named_parameters()))).render(
         "figures/mnist_cnn", format="png"
@@ -410,10 +435,12 @@ def figures(device):
 
 
 def benchmark(device, pruner_name, resnet=False):
+    """Benchmark the pruned models"""
     train_kwargs = {"batch_size": batch_size}
     test_kwargs = {"batch_size": test_batch_size}
 
-    # If we're using NVIDIA, we can apply some more software/hardware optimizations if available
+    # If we're using NVIDIA, we can apply some more software/hardware
+    # optimizations if available
     if device.type == "cuda":
         cuda_kwargs = {"num_workers": num_cpus, "pin_memory": True, "shuffle": True}
         train_kwargs.update(cuda_kwargs)
@@ -435,7 +462,7 @@ def benchmark(device, pruner_name, resnet=False):
 
     model = torch.load(model_save_path, map_location=device)
 
-    ### Warmup, CUDA typically has overhead on the first run
+    # Warmup, CUDA typically has overhead on the first run
     for _ in range(5):
         test(model, device, test_loader, criterion)
 
@@ -452,17 +479,12 @@ def benchmark(device, pruner_name, resnet=False):
         times.append(total_time)
         _, _, _, baseline_train_accuracy = test(model, device, train_loader, criterion)
         print(
-            "Average test loss: {:.4f}, Train Accuracy ({:.0f}%), Val Accuracy: {}/{} ({:.0f}%)".format(
-                test_loss,
-                baseline_train_accuracy,
-                correct,
-                test_dataset_length,
-                accuracy,
-            )
+            f"Average test loss: {test_loss:.4f}, \
+            Train Accuracy ({baseline_train_accuracy:.0f}%), \
+            Val Accuracy: {correct}/{test_dataset_length} ({accuracy:.0f}%)"
         )
 
     baseline_time = sum(times) / len(times)
-    baseline_std_time = np.std(times)
     baseline_accuracy = accuracy
     print("Average time: ", baseline_time)
 
@@ -494,9 +516,9 @@ def benchmark(device, pruner_name, resnet=False):
             times.append(total_time)
             _, _, _, train_accuracy = test(model, device, train_loader, criterion)
             tqdm.write(
-                "Average test loss: {:.4f}, Train Accuracy ({:.0f}%), Val Accuracy: {}/{} ({:.0f}%)".format(
-                    test_loss, train_accuracy, correct, test_dataset_length, accuracy
-                )
+                f"Average test loss: {test_loss:.4f}, \
+                Train Accuracy ({train_accuracy:.0f}%), \
+                Val Accuracy: {correct}/{test_dataset_length} ({accuracy:.0f}%)"
             )
             accuracies_subtrials.append(accuracy)
             training_accuracy_subtrials.append(train_accuracy)
@@ -513,7 +535,7 @@ def benchmark(device, pruner_name, resnet=False):
         accuracies.append(accuracies_avg)
         train_accuracies.append(training_accuracy_avg)
 
-        tqdm.write("Average time: {0}".format(sum(times) / len(times)))
+        tqdm.write(f"Average accuracy: {accuracies_avg:.4f}")
 
     # Convert to numpy arrays for vectorization computation
     accuracies = np.array(accuracies)
@@ -574,33 +596,33 @@ def benchmark(device, pruner_name, resnet=False):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1:
-        train_models(resnet=True)
-        train_models(resnet=False)
+    parser = argparse.ArgumentParser(description="Process some integers.")
+    parser.add_argument("--train", action="store_true", help="Train models")
+    parser.add_argument("--prune", action="store_true", help="Prune models")
+    parser.add_argument("--figures", action="store_true", help="Generate figures")
+    parser.add_argument("--benchmark", action="store_true", help="Benchmark models")
 
-        prune(device, resnet=True)
-        prune(device, resnet=False)
+    args = parser.parse_args()
 
-        figures(device)
-
-        benchmark(device, "L1NormPruner", resnet=True)
-        benchmark(device, "L1NormPruner", resnet=False)
-
-    elif sys.argv[1] == "train":
+    if args.train:
         train_models(resnet=True, retrain=False)
+        train_models(resnet=False, retrain=False)
 
-    elif sys.argv[1] == "prune":
+    elif args.prune:
         if device.type == "mps":
             UserWarning("Cannot perform pruning with NNI on MPS mode, fallback to CPU")
             device = torch.device("cpu")
-        prune(device, resnet=False)
+        prune(device, resnet=True)
 
-    elif sys.argv[1] == "figures":
+    elif args.figures:
+        if device.type == "mps":
+            UserWarning("Cannot generate graphs on MPS mode, fallback to CPU")
+            device = torch.device("cpu")
         figures(device)
 
-    elif sys.argv[1] == "benchmark":
-        benchmark(device, "L1NormPruner", resnet=False)
+    elif args.benchmark:
+        benchmark(device, "L1NormPruner", resnet=True)
 
     else:
         print("Invalid argument")
-        print("Example usage: python3 proj1.py train")
+        print("Example usage: python3 proj1.py --train")

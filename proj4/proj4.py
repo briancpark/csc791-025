@@ -1,28 +1,31 @@
-import torch
-from torch import nn
-from torch.utils.data import DataLoader, Subset
-from torchvision import datasets
-from torchvision.transforms import ToTensor
-import torchvision.transforms as transforms
-from torchvision.models import resnet18
-import os
+"""Project 4: Distillation and Compilation"""
+
+import argparse
 import csv
-import sys
 import time
-from tqdm import tqdm
-import torch.nn.functional as F
+import os
+import os.path
+
+import torch
 import torch.onnx
-from nni.compression.pytorch.pruning import *
+import torch.nn.functional as F
+from torch import nn
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
+from torchvision.models import resnet18
+
+from nni.compression.pytorch.pruning import L1NormPruner
 from nni.compression.pytorch.speedup import ModelSpeedup
 import matplotlib.pyplot as plt
 import pandas as pd
-from tvm.contrib.download import download_testdata
-from PIL import Image
+
+from tqdm import tqdm
 import numpy as np
-import os.path
-import numpy as np
-from scipy.special import softmax
-from tvm.contrib.download import download_testdata
+
+
+# pylint: disable=redefined-outer-name,invalid-name,import-outside-toplevel
+# pylint: disable=too-many-arguments,too-many-locals,not-callable,too-many-branches
+# pylint: disable=too-many-statements,pointless-exception-statement,protected-access
 
 device = torch.device(
     "mps"
@@ -34,6 +37,12 @@ device = torch.device(
 
 if not os.path.exists("logs"):
     os.mkdir("logs")
+
+if not os.path.exists("models"):
+    os.mkdir("models")
+
+if not os.path.exists("onnx_models"):
+    os.mkdir("onnx_models")
 
 print("Using device:", device.type.upper())
 
@@ -53,10 +62,12 @@ class DistillKL(nn.Module):
     """Distilling the Knowledge in a Neural Network"""
 
     def __init__(self, T):
-        super(DistillKL, self).__init__()
+        """Initialize the DistillKL class"""
+        super().__init__()
         self.T = T
 
     def forward(self, y_s, y_t):
+        """Forward pass"""
         p_s = F.log_softmax(y_s / self.T, dim=1)
         p_t = F.softmax(y_t / self.T, dim=1)
         loss = F.kl_div(p_s, p_t, size_average=False) * (self.T**2) / y_s.shape[0]
@@ -64,12 +75,12 @@ class DistillKL(nn.Module):
 
 
 def train(dataloader, model, loss_fn, optimizer):
-    size = len(dataloader.dataset)
+    """Train the model"""
     model.train()
 
     t_iter = tqdm(dataloader)
 
-    for batch, (X, y) in enumerate(t_iter):
+    for _, (X, y) in enumerate(t_iter):
         X, y = X.to(device), y.to(device)
         pred = model(X)
         loss = loss_fn(pred, y)
@@ -79,13 +90,13 @@ def train(dataloader, model, loss_fn, optimizer):
 
 
 def kd_train(train_loader, model_s, model_t, optimizer, kd_T):
+    """Train the model with knowledge distillation"""
     cri_kd = DistillKL(kd_T)
 
     model_s.train()
     model_t.eval()
-    size = len(train_loader.dataset)
 
-    for batch_idx, (data, target) in enumerate(train_loader):
+    for _, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         y_s = model_s(data)
@@ -99,6 +110,7 @@ def kd_train(train_loader, model_s, model_t, optimizer, kd_T):
 
 
 def test(dataloader, model, loss_fn):
+    """Test the model"""
     size = len(dataloader.dataset)
 
     t_iter = tqdm(dataloader)
@@ -118,13 +130,15 @@ def test(dataloader, model, loss_fn):
 
 
 def knowledge_dist():
+    """Knowledge Distillation"""
     if torch.cuda.is_available():
         # The flag below controls whether to allow TF32 on matmul. This flag defaults to False
         # in PyTorch 1.12 and later.
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
 
-        # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
+        # The flag below controls whether to allow TF32 on cuDNN. This flag
+        # defaults to True.
         torch.backends.cudnn.allow_tf32 = True
 
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
@@ -154,7 +168,9 @@ def knowledge_dist():
     temperatures = [5, 10, 15, 20]
 
     for kd_T in temperatures:
-        t_model = torch.load("models/cifar10_resnet101.pt", map_location=device)
+        t_model = torch.load(
+            "../proj2/models/cifar10_resnet101.pt", map_location=device
+        )
         s_model = torch.load("models/student_model.pt", map_location=device)
 
         loss_fn = nn.CrossEntropyLoss()
@@ -162,7 +178,7 @@ def knowledge_dist():
             s_model.parameters(), lr=params["lr"], momentum=params["momentum"]
         )
 
-        with open(f"logs/kd_{kd_T}.log", "w", newline="") as fh:
+        with open(f"logs/kd_{kd_T}.log", "w", newline="", encoding="utf-8") as fh:
             writer = csv.writer(fh)
             writer.writerow(
                 [
@@ -201,13 +217,14 @@ def knowledge_dist():
             s_test_accuracy, s_test_loss = test(test_dataloader, s_model, loss_fn)
 
             print(
-                f"Student Train Accuracy: {s_train_accuracy * 100}%, Student Train Loss: {s_train_loss}"
+                f"Student Train Accuracy: {s_train_accuracy * 100}%, \
+                Student Train Loss: {s_train_loss}"
             )
             print(
                 f"Student Test Accuracy: {s_test_accuracy * 100}%, Student Test Loss: {s_test_loss}"
             )
             torch.save(s_model, f"models/student_model_kd_{kd_T}.pt")
-            with open(f"logs/kd_{kd_T}.log", "a") as fh:
+            with open(f"logs/kd_{kd_T}.log", "a", newline="", encoding="utf-8") as fh:
                 writer = csv.writer(fh)
                 writer.writerow(
                     [t, s_train_accuracy, s_train_loss, s_test_accuracy, s_test_loss]
@@ -215,6 +232,7 @@ def knowledge_dist():
 
 
 def prune():
+    """Prune the model"""
     s_model = resnet18().to(device)
 
     config_list = [
@@ -235,9 +253,12 @@ def prune():
 
 
 def convert_torch_to_onnx():
-    x = torch.randn(1, 3, 32, 32)
-    resnet101_model = torch.load("models/cifar10_resnet101.pt", map_location=device)
-    resnet18_kd_model = torch.load("models/student_model_kd_1.pt", map_location=device)
+    """Convert torch to onnx"""
+    x = torch.randn(1, 3, 32, 32).to(device)
+    resnet101_model = torch.load(
+        "../proj2/models/cifar10_resnet101.pt", map_location=device
+    )
+    resnet18_kd_model = torch.load("models/student_model_kd_5.pt", map_location=device)
 
     torch.onnx.export(
         resnet101_model,
@@ -259,9 +280,7 @@ def convert_torch_to_onnx():
 
 
 def preprocess():
-    img_url = "https://s3.amazonaws.com/model-server/inputs/kitten.jpg"
-    img_path = download_testdata(img_url, "imagenet_cat.png", module="data")
-
+    """Preprocess the data"""
     transform = transforms.Compose(
         [
             transforms.RandomHorizontalFlip(),
@@ -278,7 +297,7 @@ def preprocess():
 
     test_dataloader = DataLoader(data, batch_size=1)
 
-    X, y = test_dataloader.__iter__().__next__()
+    X, y = next(iter(test_dataloader))
     X, y = X.numpy(), y.numpy()
 
     print(X.shape)
@@ -289,7 +308,7 @@ def preprocess():
     np.savez("cifar10", data=X)
 
     _device = torch.device("cpu")
-    t_model = torch.load("models/cifar10_resnet101.pt", map_location=_device)
+    t_model = torch.load("../proj2/models/cifar10_resnet101.pt", map_location=_device)
     s_model = torch.load("models/student_model.pt", map_location=_device)
 
     t_times = []
@@ -315,8 +334,9 @@ def preprocess():
     print("Student model inference time std: ", np.std(s_times) * 1000)
 
 
-def plot():
-    temperatures = [1, 5, 10, 15, 20]
+def figures():
+    """Plot the data"""
+    temperatures = [5, 10, 15, 20]
 
     plt.figure(figsize=(10, 5))
     plt.plot(
@@ -326,8 +346,7 @@ def plot():
         linestyle="dashed",
     )
     for t in temperatures:
-        df = pd.read_csv("logs/kd_{}.log".format(t))
-        # df["student_train_accuracy","student_train_loss","student_test_accuracy","student_test_loss"]
+        df = pd.read_csv(f"logs/kd_{t}.log")
         plt.plot(
             df["epoch"],
             df["student_train_accuracy"] * 100,
@@ -373,7 +392,7 @@ def plot():
 
     x_pos = np.arange(len(tvm_models))
 
-    fig, ax = plt.subplots(figsize=(20, 5))
+    _, ax = plt.subplots(figsize=(20, 5))
     ax.bar(
         x_pos,
         mean_times,
@@ -397,22 +416,32 @@ def plot():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1:
+    parser = argparse.ArgumentParser(description="Process some integers.")
+    parser.add_argument("--prune", action="store_true", help="Prune models")
+    parser.add_argument(
+        "--distillation", action="store_true", help="Perform knowledge distillation"
+    )
+    parser.add_argument("--convert", action="store_true", help="Convert torch to onnx")
+    parser.add_argument("--preprocess", action="store_true", help="Preprocess data")
+    parser.add_argument("--figures", action="store_true", help="Plot data")
+
+    args = parser.parse_args()
+
+    if args.prune:
         prune()
+
+    elif args.distillation:
         knowledge_dist()
+
+    elif args.convert:
         convert_torch_to_onnx()
-        pre_process()
-        plot()
-    elif sys.argv[1] == "prune":
-        prune()
-    elif sys.argv[1] == "distillation":
-        knowledge_dist()
-    elif sys.argv[1] == "convert":
-        convert_torch_to_onnx()
-    elif sys.argv[1] == "preprocess":
+
+    elif args.preprocess:
         preprocess()
-    elif sys.argv[1] == "plot":
-        plot()
+
+    elif args.figures:
+        figures()
+
     else:
         print("Invalid argument")
-        print("Example usage: python3 proj4.py distillation")
+        print("Example usage: python3 proj4.py --distillation")

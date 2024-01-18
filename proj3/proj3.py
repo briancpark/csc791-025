@@ -1,20 +1,15 @@
-import torch
-import sys
+"""Project 3: DNN HPO via NNI"""
+
 import os
+import argparse
+
 import nni
-import torch.nn as nn
+import torch
 from nni.experiment import Experiment
 
-
-device = torch.device(
-    "mps"
-    if torch.backends.mps.is_available()
-    else "cuda"
-    if torch.cuda.is_available()
-    else "cpu"
-)
-
-print("Using device:", device.type.upper())
+# pylint: disable=redefined-outer-name,invalid-name,import-outside-toplevel
+# pylint: disable=too-many-arguments,too-many-locals,not-callable,too-many-branches
+# pylint: disable=too-many-statements,pointless-exception-statement,protected-access
 
 # Set Random Seed
 torch.manual_seed(42)
@@ -28,13 +23,15 @@ if torch.cuda.is_available():
     # in PyTorch 1.12 and later.
     torch.backends.cuda.matmul.allow_tf32 = True
 
-    # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
+    # The flag below controls whether to allow TF32 on cuDNN. This flag
+    # defaults to True.
     torch.backends.cudnn.allow_tf32 = True
 
     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
 
 
-def hpo(device, tuner, advanced=False, use_vgg=False):
+def hpo(tuner, advanced=False, use_vgg=False):
+    """Hyperparameter Tuning"""
     name = "VGG-11 HPO " if use_vgg else "MLP HPO "
     name += tuner
     name += " Advanced" if advanced else " Default"
@@ -44,9 +41,9 @@ def hpo(device, tuner, advanced=False, use_vgg=False):
     experiment.config.experiment_working_directory = "experiments"
     experiment.config.experiment_name = name
     if use_vgg:
-        experiment.config.trial_command = "python model.py vgg"
+        experiment.config.trial_command = "python model.py --vgg"
     else:
-        experiment.config.trial_command = "python model.py n"
+        experiment.config.trial_command = "python model.py"
 
     search_space = {
         "lr": {"_type": "loguniform", "_value": [0.0001, 0.1]},
@@ -105,14 +102,26 @@ def hpo(device, tuner, advanced=False, use_vgg=False):
 
 
 if __name__ == "__main__":
-    if sys.argv[1] == "view":
-        nni.experiment.Experiment.view(sys.argv[2])
+    parser = argparse.ArgumentParser(description="Process some integers.")
+    parser.add_argument(
+        "--view", metavar="experiment_id", type=str, help="an experiment id for viewing"
+    )
+    parser.add_argument(
+        "--hpo",
+        nargs=3,
+        metavar=("tuner", "model", "mode"),
+        type=str,
+        help="hyperparameter optimization mode and model type",
+    )
 
-    elif sys.argv[1] == "hpo":
-        use_vgg = sys.argv[3] == "vgg"
-        advanced = sys.argv[4] == "advanced"
+    args = parser.parse_args()
 
-        hpo(device, sys.argv[2], advanced, use_vgg)
+    if args.view:
+        nni.experiment.Experiment.view(args.view)
+    elif args.hpo:
+        use_vgg = args.hpo[1] == "vgg"
+        advanced = args.hpo[2] == "advanced"
+        hpo(args.hpo[0], advanced, use_vgg)
     else:
         print("Invalid argument")
-        print("Example usage: python3 proj1.py train")
+        print("Example usage: python3 proj3.py --view <experiment-id>")
