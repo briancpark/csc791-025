@@ -12,6 +12,7 @@ __pycache__
 *.bbl
 *.blg
 *.aux
+*.pdf
 
 # NNI
 experiments/
